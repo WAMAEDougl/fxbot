@@ -19,6 +19,8 @@ audit/
 
 # secrets - never, ever
 .env
+.env.*
+!.env.example
 *.pem
 secrets/
 
