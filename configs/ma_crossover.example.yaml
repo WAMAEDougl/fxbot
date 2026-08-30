@@ -1,0 +1,35 @@
+# Example strategy config. Promoted configs are signed and moved to the registry
+# by research/registry.py - this file is the pre-promotion research form.
+strategy_id: ma_crossover
+strategy_class: "strategies.ma_crossover:MaCrossover"
+
+params:
+  symbols: ["AAPL", "MSFT", "EUR.USD"]
+  fast: 20
+  slow: 50
+  atr_window: 14
+  stop_atr_mult: 2.0
+  target_rr: 2.0
+  allow_short: true
+  conviction: 1.0
+  seed: 0
+
+# Backtest / risk overrides for research runs
+backtest:
+  starting_equity: 100000
+  interval: "1d"
+  risk:
+    risk_fraction: 0.005
+    max_risk_fraction: 0.01
+    daily_loss_limit: 0.03
+    max_trades_per_day: 4
+  costs:
+    spread_bps: 2.0
+    commission_bps: 0.5
+    swap_bps_per_day: 0.15
+    impact_coef: 0.1
+    latency_bars: 1
+  instruments:
+    AAPL:   { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    MSFT:   { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EUR.USD: { value_per_point: 100000.0, lot_step: 1000.0, min_lot: 1000.0, margin_rate: 0.033 }

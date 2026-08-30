@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# data + state - never commit
+data_lake/
+*.parquet
+*.duckdb
+*.sqlite
+state/
+audit/
+*.jsonl
+
+# secrets - never, ever
+.env
+*.pem
+secrets/
+
+# research scratch
+research/notebooks/*.ipynb
+!research/notebooks/.gitkeep
+reports/*.html

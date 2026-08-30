@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-system"
+version = "0.1.0"
+description = "Single-node, multi-strategy systematic trading system (research + supervised live execution)."
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyarrow>=14",
+    "duckdb>=0.10",
+    "pydantic>=2.5",
+    "structlog>=24.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+ibkr = ["ib_async>=1.0"]
+scipy = ["scipy>=1.11"]  # optional: research/validation falls back to a pure-python normal
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.98",
+    "ruff>=0.3",
+    "mypy>=1.9",
+]
+
+[tool.setuptools]
+packages = [
+    "core",
+    "data",
+    "data.adapters",
+    "data.features",
+    "strategies",
+    "risk",
+    "execution",
+    "execution.brokers",
+    "research",
+    "research.validation",
+    "ops",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# UP042: str+Enum is intentional (stable JSON values); SIM102/105: readability calls
+ignore = ["E501", "UP042", "SIM102", "SIM105"]
