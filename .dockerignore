@@ -1,0 +1,12 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+state
+audit
+data_lake
+__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache

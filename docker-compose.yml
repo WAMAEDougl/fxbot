@@ -1,0 +1,47 @@
+# One environment per compose project. Run paper and live as separate projects
+# with separate env files so they can never share credentials:
+#   docker compose -p fx-paper --env-file .env.paper up -d gateway
+#   docker compose -p fx-live  --env-file .env.live  up -d gateway
+#
+# Broker is chosen by TS_BROKER in .env. With TS_BROKER=alpaca no gateway is
+# needed: just `docker compose --profile engine up -d --build`.
+# With TS_BROKER=ibkr also start the gateway: `--profile ibkr --profile engine`.
+#
+# IB Gateway uses IBC (via gnzsnz/ib-gateway) because IBKR has no headless API.
+# Weekly 2FA: approve the IBKR Mobile prompt after the Saturday-night reset.
+services:
+  gateway:
+    profiles: ["ibkr"]
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: always
+    environment:
+      TWS_USERID: ${IB_USER}
+      TWS_PASSWORD: ${IB_PASSWORD}
+      TRADING_MODE: ${TS_ENV:-paper}          # paper | live
+      AUTO_RESTART_TIME: "11:59 PM"
+      TWOFA_TIMEOUT_ACTION: restart
+      READ_ONLY_API: "no"
+    ports:
+      # Bound to localhost only. Never expose the API port publicly.
+      - "127.0.0.1:4001:4003"   # live API (proxied by the image)
+      - "127.0.0.1:4002:4004"   # paper API (proxied by the image)
+
+  # Start the engine only after the gateway is logged in (2FA approved):
+  #   docker compose --profile engine up -d
+  engine:
+    profiles: ["engine"]
+    build: .
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      IB_HOST: gateway  # only used when TS_BROKER=ibkr
+      IB_PORT: ${IB_PORT:-4004}
+    volumes:
+      - ./state:/app/state
+      - ./audit:/app/audit
+      - ./data_lake:/app/data_lake
+    command: ["python", "-m", "scripts.run_live", "--config", "${TS_CONFIG:-configs/ma_crossover.alpaca.yaml}"]
+    healthcheck:  # runner touches state/healthy every ~10s
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(time.time()-os.path.getmtime('state/healthy')>120)"]
+      interval: 60s
+      retries: 3
