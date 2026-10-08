@@ -151,6 +151,16 @@ class Portfolio:
 
         p.last_price = fill.price
 
+    def seed_position(self, symbol: str, qty: float, price: float) -> None:
+        """Adopt a broker-reported position at startup (the broker is the source
+        of truth). Cost basis is ``price`` - the broker's own average cost is not
+        exposed by ``BrokerAdapter.positions`` - so unrealised P/L restarts at 0."""
+        p = self._positions.setdefault(symbol, Position(symbol=symbol))
+        p.qty = qty
+        p.avg_price = price
+        p.last_price = price
+        p.opened_ts = self._now if qty else None
+
     # -- snapshots -------------------------------------------------- #
     def snapshot(self) -> dict:
         return {

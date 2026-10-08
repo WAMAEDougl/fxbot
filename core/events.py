@@ -134,7 +134,7 @@ class Signal(Event):
     meta: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        Event.__post_init__(self)  # not super(): zero-arg super breaks under slots=True on 3.12
         if not 0.0 <= self.conviction <= 1.0:
             raise ValueError(f"conviction must be in [0, 1], got {self.conviction}")
 
@@ -159,7 +159,7 @@ class Order(Event):
     features_hash: str = ""
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        Event.__post_init__(self)  # not super(): zero-arg super breaks under slots=True on 3.12
         if self.qty <= 0:
             raise ValueError(f"order qty must be positive, got {self.qty}")
         # Bracket enforcement (design 4.4): no naked orders reach the OMS.

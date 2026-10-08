@@ -35,12 +35,15 @@ packages = [
     "data.adapters",
     "data.features",
     "strategies",
+    "strategies.ma_crossover",
     "risk",
     "execution",
     "execution.brokers",
     "research",
     "research.validation",
     "ops",
+    "ops.reports",
+    "scripts",
 ]
 
 [tool.pytest.ini_options]

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 
@@ -130,6 +130,13 @@ class OMS:
     async def on_broker_fill(self, fill: Fill) -> None:
         st = self._orders.get(fill.order_id)
         if st is None:
+            return
+        if fill.strategy_id != st.order.strategy_id:
+            fill = replace(fill, strategy_id=st.order.strategy_id)
+        if fill.side is not st.order.side:
+            # Bracket exit (stop-loss / take-profit share the entry's order ref).
+            # It reduces the position but is not part of the entry order's fills.
+            await self.bus.publish(fill)
             return
         st.filled_qty += fill.qty
         total = st.filled_qty
