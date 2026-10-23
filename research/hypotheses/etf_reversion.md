@@ -108,3 +108,28 @@ similar Sharpe (0.75 vs 0.80), on 14 different ETFs, every one profitable, with 
 drawdown. What it does not show: independence in time (same 2016-2026 bull market), a
 Sharpe above buy-and-hold (0.75 vs 0.78), or stability across regimes (profit clustered in
 2017 and 2025; 2018 was -6.8%). Absolute return is small (+4.3%/yr at 0.5% risk per trade).
+
+---
+## FORWARD PAPER TEST (exploratory), plan written 2026-10-23 BEFORE it starts
+
+**Status.** The strategy was NOT promoted (failed the pre-registered regime check). This forward
+test is an owner-approved EXPLORATION on a paper account with no real money. It does not count as
+rollout stage 2 and does not change the verdict above.
+
+**What runs.** The frozen replication config (configs/etf_reversion_oos.yaml: 14 ETFs, rsi_entry 15,
+exit_window 5, long-only), on Alpaca paper, fed SIP prices adjusted for splits and dividends (the
+same data kind as the research). No parameter is changed during the test.
+
+**What it can tell us.** (1) Does the plumbing work: queued after-hours orders, bracket entries, the
+reduce-only close that cancels and restores protective legs, margin gating, fills and reconcile?
+(2) Do live signals match the backtest on the same bars? (3) Is realised slippage close to the
+modelled 1.5 bps spread plus impact? It cannot, in a few months, prove the strategy is profitable:
+expect about 12 trades a month, so roughly 40 trades in 3 months.
+
+**Review at** >= 3 months AND >= 100 closed trades (whichever is later). Consistent with the
+backtest means: win rate within 55-75% (backtest 66%), mean trade expectancy > 0, realised slippage
+no worse than 2x modelled, and no unreconciled position drift.
+
+**Stop immediately if:** any position is ever left without protective orders (the adapter raises
+"CRITICAL: close ... AND protection could not be restored"), the kill switch trips for a reason
+other than market stress, or the account draws down more than 15%.

@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from core.events import MarketData
@@ -126,12 +126,15 @@ class AlpacaFeed:
     venue = "alpaca"
 
     def __init__(self, http: AlpacaHttp | None = None, data_feed: str | None = None,
-                 adjustment: str = "split") -> None:
-        """``adjustment``: ``split`` for live (prices match the broker's), ``all``
-        (splits + dividends) for research, so ETF total return is not understated."""
+                 adjustment: str | None = None) -> None:
+        """``adjustment``: ``split`` (default; prices match the broker's) or ``all``
+        (splits + dividends), which research used so ETF total return is not understated.
+        Set ALPACA_ADJUSTMENT=all and ALPACA_DATA_FEED=sip to feed a live strategy the
+        same kind of data it was validated on. The latest bar is never adjusted, so
+        stops and targets computed from it are still in real price terms."""
         self.http = http or AlpacaHttp()
         self.data_feed = data_feed or os.environ.get("ALPACA_DATA_FEED", "iex")
-        self.adjustment = adjustment
+        self.adjustment = adjustment or os.environ.get("ALPACA_ADJUSTMENT", "split")
 
     async def connect(self) -> None:  # symmetry with IbkrFeed; REST needs no session
         return None
@@ -146,6 +149,11 @@ class AlpacaFeed:
         out: list[MarketData] = []
         token: str | None = None
         now = datetime.now(UTC)
+        if self.data_feed == "sip":
+            # free SIP refuses queries that include the most recent 15 minutes (HTTP 403)
+            end = min(end, now - timedelta(minutes=16))
+            if start >= end:
+                return []
         while True:
             page = await self.http.request(
                 "GET", f"{DATA_URL}/v2/stocks/{sym}/bars",

@@ -163,3 +163,31 @@ async def test_feed_adjustment_is_configurable():
     http, t = _http({("GET", "/v2/stocks/SPY/bars"): (200, {"bars": [], "next_page_token": None})})
     await AlpacaFeed(http, adjustment="all").backfill("SPY", NOW - timedelta(days=5), NOW, "1d")
     assert "adjustment=all" in t.calls[0][2]
+
+
+async def test_sip_feed_never_asks_for_the_last_15_minutes():
+    """Free SIP returns 403 if the range reaches into the most recent 15 minutes."""
+    http, t = _http({("GET", "/v2/stocks/SPY/bars"): (200, {"bars": [], "next_page_token": None})})
+    now = datetime.now(UTC)
+    await AlpacaFeed(http, data_feed="sip").backfill("SPY", now - timedelta(days=5), now, "1d")
+    from urllib.parse import parse_qs, urlparse
+
+    end = parse_qs(urlparse(t.calls[0][2]).query)["end"][0]
+    assert datetime.fromisoformat(end.replace("Z", "+00:00")) <= now - timedelta(minutes=15)
+
+
+async def test_iex_feed_end_is_not_clamped():
+    http, t = _http({("GET", "/v2/stocks/SPY/bars"): (200, {"bars": [], "next_page_token": None})})
+    now = datetime.now(UTC)
+    await AlpacaFeed(http, data_feed="iex").backfill("SPY", now - timedelta(days=5), now, "1d")
+    from urllib.parse import parse_qs, urlparse
+
+    end = parse_qs(urlparse(t.calls[0][2]).query)["end"][0]
+    assert datetime.fromisoformat(end.replace("Z", "+00:00")) >= now - timedelta(minutes=2)
+
+
+async def test_adjustment_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("ALPACA_ADJUSTMENT", "all")
+    http, t = _http({("GET", "/v2/stocks/SPY/bars"): (200, {"bars": [], "next_page_token": None})})
+    await AlpacaFeed(http).backfill("SPY", NOW - timedelta(days=5), NOW, "1d")
+    assert "adjustment=all" in t.calls[0][2]
