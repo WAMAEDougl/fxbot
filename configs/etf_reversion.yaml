@@ -1,0 +1,47 @@
+# Research config for short-term ETF mean reversion. Hypothesis: research/hypotheses/etf_reversion.md
+# Validate with:  python -m scripts.research_validate --config configs/etf_reversion.yaml --extra-trials 18
+# (18 = the etf_trend trials already run on this same data)
+strategy_id: etf_reversion
+strategy_class: "strategies.etf_reversion:EtfReversion"
+
+params:
+  symbols: ["SPY", "QQQ", "IWM", "EFA", "EEM"]
+  trend_window: 200
+  rsi_window: 2
+  rsi_entry: 10.0
+  exit_window: 5
+  max_hold_bars: 10
+  atr_window: 14
+  stop_atr_mult: 3.0
+  target_rr: 10.0
+  allow_short: false
+  conviction: 1.0
+  resignal_gap_bars: 3
+  seed: 0
+
+research:
+  grid:
+    rsi_entry: [5.0, 10.0, 15.0]
+    exit_window: [5, 10]
+
+backtest:
+  starting_equity: 100000
+  interval: "1d"
+  risk:
+    risk_fraction: 0.005
+    max_risk_fraction: 0.01
+    daily_loss_limit: 0.03
+    max_trades_per_day: 10
+    order_ttl_days: 4        # daily bars: a Friday signal must survive the weekend
+  costs:
+    spread_bps: 1.5          # liquid ETFs
+    commission_bps: 0.5
+    swap_bps_per_day: 0.15
+    impact_coef: 0.1
+    latency_bars: 1
+  instruments:
+    SPY: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    QQQ: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    IWM: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EFA: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EEM: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }

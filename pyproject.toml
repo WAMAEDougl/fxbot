@@ -37,6 +37,7 @@ packages = [
     "strategies",
     "strategies.ma_crossover",
     "strategies.etf_trend",
+    "strategies.etf_reversion",
     "risk",
     "execution",
     "execution.brokers",

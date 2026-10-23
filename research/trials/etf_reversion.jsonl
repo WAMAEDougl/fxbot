@@ -1,0 +1,6 @@
+{"ts": "2026-10-23T11:41:33.784654+00:00", "params": {"rsi_entry": 5.0, "exit_window": 5}}
+{"ts": "2026-10-23T11:41:33.784745+00:00", "params": {"rsi_entry": 5.0, "exit_window": 10}}
+{"ts": "2026-10-23T11:41:33.784782+00:00", "params": {"rsi_entry": 10.0, "exit_window": 5}}
+{"ts": "2026-10-23T11:41:33.784809+00:00", "params": {"rsi_entry": 10.0, "exit_window": 10}}
+{"ts": "2026-10-23T11:41:33.784836+00:00", "params": {"rsi_entry": 15.0, "exit_window": 5}}
+{"ts": "2026-10-23T11:41:33.784861+00:00", "params": {"rsi_entry": 15.0, "exit_window": 10}}
