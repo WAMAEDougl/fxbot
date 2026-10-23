@@ -29,3 +29,6 @@ secrets/
 research/notebooks/*.ipynb
 !research/notebooks/.gitkeep
 reports/*.html
+
+# the honest trial count must be versioned
+!research/trials/*.jsonl

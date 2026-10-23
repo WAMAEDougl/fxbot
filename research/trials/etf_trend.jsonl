@@ -1,0 +1,18 @@
+{"ts": "2026-10-23T10:26:31.852510+00:00", "params": {"lookback": 100, "stop_atr_mult": 2.0}}
+{"ts": "2026-10-23T10:26:31.852591+00:00", "params": {"lookback": 100, "stop_atr_mult": 3.0}}
+{"ts": "2026-10-23T10:26:31.852631+00:00", "params": {"lookback": 100, "stop_atr_mult": 4.0}}
+{"ts": "2026-10-23T10:26:31.852661+00:00", "params": {"lookback": 150, "stop_atr_mult": 2.0}}
+{"ts": "2026-10-23T10:26:31.852690+00:00", "params": {"lookback": 150, "stop_atr_mult": 3.0}}
+{"ts": "2026-10-23T10:26:31.852717+00:00", "params": {"lookback": 150, "stop_atr_mult": 4.0}}
+{"ts": "2026-10-23T10:26:31.852743+00:00", "params": {"lookback": 200, "stop_atr_mult": 2.0}}
+{"ts": "2026-10-23T10:26:31.852768+00:00", "params": {"lookback": 200, "stop_atr_mult": 3.0}}
+{"ts": "2026-10-23T10:26:31.852794+00:00", "params": {"lookback": 200, "stop_atr_mult": 4.0}}
+{"ts": "2026-10-23T10:44:51.618904+00:00", "params": {"lookback": 100, "stop_atr_mult": 2.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.618967+00:00", "params": {"lookback": 100, "stop_atr_mult": 3.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619007+00:00", "params": {"lookback": 100, "stop_atr_mult": 4.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619040+00:00", "params": {"lookback": 150, "stop_atr_mult": 2.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619071+00:00", "params": {"lookback": 150, "stop_atr_mult": 3.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619100+00:00", "params": {"lookback": 150, "stop_atr_mult": 4.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619129+00:00", "params": {"lookback": 200, "stop_atr_mult": 2.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619158+00:00", "params": {"lookback": 200, "stop_atr_mult": 3.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
+{"ts": "2026-10-23T10:44:51.619187+00:00", "params": {"lookback": 200, "stop_atr_mult": 4.0, "exit_on_trend_flip": true, "target_rr": 10.0}}
