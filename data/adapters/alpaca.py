@@ -125,9 +125,13 @@ def _iso(dt: datetime) -> str:
 class AlpacaFeed:
     venue = "alpaca"
 
-    def __init__(self, http: AlpacaHttp | None = None, data_feed: str | None = None) -> None:
+    def __init__(self, http: AlpacaHttp | None = None, data_feed: str | None = None,
+                 adjustment: str = "split") -> None:
+        """``adjustment``: ``split`` for live (prices match the broker's), ``all``
+        (splits + dividends) for research, so ETF total return is not understated."""
         self.http = http or AlpacaHttp()
         self.data_feed = data_feed or os.environ.get("ALPACA_DATA_FEED", "iex")
+        self.adjustment = adjustment
 
     async def connect(self) -> None:  # symmetry with IbkrFeed; REST needs no session
         return None
@@ -148,7 +152,7 @@ class AlpacaFeed:
                 params={
                     "timeframe": _TIMEFRAME[interval],
                     "start": _iso(start), "end": _iso(end),
-                    "adjustment": "split", "feed": self.data_feed,
+                    "adjustment": self.adjustment, "feed": self.data_feed,
                     "limit": 10000, "sort": "asc", "page_token": token,
                 },
             )

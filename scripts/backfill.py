@@ -3,6 +3,9 @@
     python -m scripts.backfill --venue synthetic --symbols SYNTH --start 2015-01-01
     python -m scripts.backfill --venue ibkr --symbols AAPL MSFT EUR.USD --start 2015-01-01
 
+    python -m scripts.backfill --venue alpaca --symbols SPY TLT --start 2016-01-01
+
+The Alpaca path needs ALPACA_API_KEY/ALPACA_API_SECRET (free tier history starts ~2016).
 The IBKR path needs a running TWS/Gateway and `pip install "trading-system[ibkr]"`.
 """
 
@@ -17,7 +20,7 @@ import pandas as pd
 from data.lake import ParquetLake
 
 
-def _venue(name: str):
+def _venue(name: str, adjustment: str = "all"):
     if name == "synthetic":
         from data.adapters.synthetic import SyntheticFeed
 
@@ -26,6 +29,10 @@ def _venue(name: str):
         from data.adapters.ibkr import IbkrFeed
 
         return IbkrFeed()
+    if name == "alpaca":
+        from data.adapters.alpaca import AlpacaFeed
+
+        return AlpacaFeed(adjustment=adjustment)
     if name == "csv":
         raise SystemExit("use --csv PATH per symbol for the csv venue")
     raise SystemExit(f"unknown venue: {name}")
@@ -33,7 +40,7 @@ def _venue(name: str):
 
 async def _run(args) -> None:
     lake = ParquetLake(args.lake)
-    feed = _venue(args.venue)
+    feed = _venue(args.venue, args.adjustment)
     start = datetime.fromisoformat(args.start).replace(tzinfo=UTC)
     end = (
         datetime.fromisoformat(args.end).replace(tzinfo=UTC)
@@ -69,6 +76,8 @@ def main() -> None:
     p.add_argument("--end", default=None)
     p.add_argument("--interval", default="1d")
     p.add_argument("--lake", default="data_lake")
+    p.add_argument("--adjustment", default="all", choices=["raw", "split", "dividend", "all"],
+                   help="alpaca only; 'all' = splits + dividends (research default)")
     asyncio.run(_run(p.parse_args()))
 
 

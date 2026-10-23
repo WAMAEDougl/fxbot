@@ -1,0 +1,52 @@
+# Research config for ETF trend following. Hypothesis: research/hypotheses/etf_trend.md
+strategy_id: etf_trend
+strategy_class: "strategies.etf_trend:EtfTrend"
+
+params:
+  symbols: ["SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "VNQ"]
+  lookback: 200
+  atr_window: 14
+  stop_atr_mult: 3.0
+  target_rr: 10.0          # distant: the trend-flip close is the real exit
+  allow_short: true
+  conviction: 1.0
+  resignal_gap_bars: 3
+  exit_on_trend_flip: true # close on a trend flip (reduce-only order); bracket = disaster stop
+  seed: 0
+
+# Parameter grid evaluated by scripts/research_validate.py (each cell is a trial).
+research:
+  grid:
+    lookback: [100, 150, 200]
+    stop_atr_mult: [2.0, 3.0, 4.0]
+    # variant keys are part of every logged trial, so the earlier fixed-bracket runs
+    # (which lacked them) and these close-on-flip runs are counted separately
+    exit_on_trend_flip: [true]
+    target_rr: [10.0]
+
+backtest:
+  starting_equity: 100000
+  interval: "1d"
+  risk:
+    risk_fraction: 0.005
+    max_risk_fraction: 0.01
+    daily_loss_limit: 0.03
+    max_trades_per_day: 10
+    order_ttl_days: 4        # daily bars: a Friday signal must survive the weekend
+  costs:
+    spread_bps: 1.5          # liquid ETFs
+    commission_bps: 0.5      # SEC/TAF-style fees; Alpaca itself is commission-free
+    swap_bps_per_day: 0.15   # pessimistic carry/borrow on held notional
+    impact_coef: 0.1
+    latency_bars: 1
+  instruments:
+    SPY: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    QQQ: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    IWM: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EFA: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EEM: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    TLT: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    IEF: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    GLD: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    DBC: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    VNQ: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }

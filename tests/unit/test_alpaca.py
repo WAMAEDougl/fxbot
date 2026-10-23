@@ -157,3 +157,9 @@ def test_events_construct_under_slots_dataclass():
     Signal(ts=NOW, symbol="AAPL", direction=Direction.LONG, strategy_id="s",
            entry_hint=100.0, stop_hint=95.0, target_hint=110.0)
     _order()
+
+
+async def test_feed_adjustment_is_configurable():
+    http, t = _http({("GET", "/v2/stocks/SPY/bars"): (200, {"bars": [], "next_page_token": None})})
+    await AlpacaFeed(http, adjustment="all").backfill("SPY", NOW - timedelta(days=5), NOW, "1d")
+    assert "adjustment=all" in t.calls[0][2]

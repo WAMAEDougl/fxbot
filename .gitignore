@@ -16,6 +16,7 @@ data_lake/
 state/
 audit/
 *.jsonl
+!research/trials/*.jsonl  # the honest trial count must be versioned
 
 # secrets - never, ever
 .env
