@@ -80,7 +80,11 @@ def evaluate(inp: PromotionInputs) -> PromotionResult:
     reg = list(inp.regime_metric.values())
     concentrated = (max(reg) > 3 * np.median(reg)) if len(reg) >= 3 else True
     checks["not_regime_concentrated"] = not concentrated
-    detail["not_regime_concentrated"] = f"regime expectancies={ {k: round(v,4) for k,v in inp.regime_metric.items()} }"
+    ratio = (max(reg) / np.median(reg)) if len(reg) >= 3 and np.median(reg) > 0 else float("nan")
+    detail["not_regime_concentrated"] = (
+        f"max/median={ratio:.2f} (concentrated if > 3); "
+        f"regime expectancies={ {k: round(v, 6) for k, v in inp.regime_metric.items()} }"
+    )
 
     checks["min_100_trades"] = inp.n_trades >= 100
     detail["min_100_trades"] = f"{inp.n_trades} trades (need >= 100)"

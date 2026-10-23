@@ -83,3 +83,28 @@ on a majority (>= 60%) of the symbols. Anything else is a failed replication.
 **Limits stated in advance.** Same 2016-2026 period and a strongly correlated equity market, so
 this is NOT an independent sample in time; it tests breadth, not regime. A pass would raise
 confidence but would not remove the bull-market caveat. The paper-trading stage is still required.
+
+---
+## RESULT of the pre-registered replication (2026-10-23)
+
+Frozen config (rsi_entry 15, exit_window 5) run once on the 14 pre-registered ETFs, 1 trial.
+- Sharpe **0.75**, CAGR +4.3%, max DD 11.1%, 1,561 trades, win rate 66%, expectancy +0.10R.
+  Equal-weight B&H of the same 14: +12.1% / Sharpe 0.78 / DD 36.7%.
+- DSR **0.993** (n_trials = 1); PBO n/a (single configuration); every CPCV path positive;
+  worst-path DD 11.1% (tol 26%); >= 100 trades.
+- **14 of 14 symbols profitable** (smallest XLE +$275, largest XLK +$8.2k).
+- By year: +1.5, +15.9, -6.8, +6.2, +3.9, +9.7, -1.4, +0.4, +0.7, +12.0, +6.0 % (2016..2026);
+  9 up, 2 down. Yearly win rate 57-76%.
+- **FAIL: not_regime_concentrated.** max/median of yearly expectancy = 3.79 (limit 3). Two years
+  (2017 and 2025) supply about 58% of the cumulative yearly return.
+
+**Verdict under the pre-registered rule: FAILED REPLICATION** (criterion 1 requires every
+objective check). Criteria 2 (Sharpe >= 0.5) and 3 (>= 60% of symbols profitable) were met.
+This is not rescued by redefining the check afterwards. Any change to the regime check may only
+apply to FUTURE runs and must re-score earlier results (etf_trend, etf_reversion run 1) the same way.
+
+**Honest read.** The strongest evidence so far that the effect is real: it replicates, with a
+similar Sharpe (0.75 vs 0.80), on 14 different ETFs, every one profitable, with a small
+drawdown. What it does not show: independence in time (same 2016-2026 bull market), a
+Sharpe above buy-and-hold (0.75 vs 0.78), or stability across regimes (profit clustered in
+2017 and 2025; 2018 was -6.8%). Absolute return is small (+4.3%/yr at 0.5% risk per trade).

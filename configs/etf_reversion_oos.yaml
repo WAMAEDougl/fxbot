@@ -1,0 +1,58 @@
+# PRE-REGISTERED out-of-sample replication (see research/hypotheses/etf_reversion.md).
+# Frozen config from the etf_reversion search, run ONCE on 14 ETFs it has never seen.
+# Do not tune anything here. Validate with:
+#   python -m scripts.research_validate --config configs/etf_reversion_oos.yaml --max-dd 0.26
+strategy_id: etf_reversion_oos
+strategy_class: "strategies.etf_reversion:EtfReversion"
+
+params:
+  strategy_id: etf_reversion_oos
+  symbols: ["DIA", "MDY", "XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY", "EWJ", "EWG", "EWU"]
+  trend_window: 200
+  rsi_window: 2
+  rsi_entry: 15.0
+  exit_window: 5
+  max_hold_bars: 10
+  atr_window: 14
+  stop_atr_mult: 3.0
+  target_rr: 10.0
+  allow_short: false
+  conviction: 1.0
+  resignal_gap_bars: 3
+  seed: 0
+
+research:
+  grid:            # exactly one cell: the frozen configuration
+    rsi_entry: [15.0]
+    exit_window: [5]
+
+backtest:
+  starting_equity: 100000
+  interval: "1d"
+  risk:
+    risk_fraction: 0.005
+    max_risk_fraction: 0.01
+    daily_loss_limit: 0.03
+    max_trades_per_day: 10
+    order_ttl_days: 4
+  costs:
+    spread_bps: 1.5
+    commission_bps: 0.5
+    swap_bps_per_day: 0.15
+    impact_coef: 0.1
+    latency_bars: 1
+  instruments:
+    DIA: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    MDY: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLB: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLE: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLF: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLI: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLK: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLP: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLU: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLV: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    XLY: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EWJ: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EWG: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    EWU: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
