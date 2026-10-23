@@ -59,3 +59,27 @@ Honest read: a real but small effect with very low drawdown and a Sharpe in line
 buy-and-hold, but too little evidence to rule out luck once all 24 trials are counted.
 Scaling position size would not help: Sharpe, DSR and PBO are scale-invariant.
 Not counted as a pass by leaving out the 18 earlier trials; that would be the cheat 5.1 warns about.
+
+---
+## PRE-REGISTRATION: out-of-sample replication (written 2026-10-23, BEFORE pulling or running any of this data)
+
+**Why.** Run 1 failed the DSR/PBO bar only narrowly, and its real constraint is evidence (10 years,
+5 ETFs). Alpaca's free history starts in 2016, so a longer history is not available. What IS
+available is a cross-sectional replication on ETFs the rule was never tuned or examined on.
+
+**Frozen configuration (no re-tuning on the new data, ever):** `rsi_entry` 15, `exit_window` 5,
+everything else exactly as in configs/etf_reversion.yaml (long-only, trend_window 200, RSI(2),
+max_hold 10, stop 3 ATR). This is ONE trial on the new universe.
+
+**Universe B (all included, whatever the outcome):** DIA, MDY, XLB, XLE, XLF, XLI, XLK, XLP,
+XLU, XLV, XLY, EWJ, EWG, EWU: US large/mid caps, the nine sector ETFs with full history,
+and three developed-market country ETFs. None of these were used in run 1.
+
+**Pass criteria, fixed now:** all of (1) the repo's objective checks (DSR > 0.95 with n_trials = 1,
+every CPCV path positive, worst-path DD within 26%, not regime-concentrated, >= 100 trades;
+PBO is not applicable to a single frozen configuration), AND (2) Sharpe >= 0.5, AND (3) profitable
+on a majority (>= 60%) of the symbols. Anything else is a failed replication.
+
+**Limits stated in advance.** Same 2016-2026 period and a strongly correlated equity market, so
+this is NOT an independent sample in time; it tests breadth, not regime. A pass would raise
+confidence but would not remove the bull-market caveat. The paper-trading stage is still required.

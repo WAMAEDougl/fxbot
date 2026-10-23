@@ -46,14 +46,28 @@ def evaluate(inp: PromotionInputs) -> PromotionResult:
     checks: dict[str, bool] = {}
     detail: dict[str, str] = {}
 
-    sr_var = _sr_variance_from_matrix(inp.perf_matrix)
+    single = inp.perf_matrix.shape[1] < 2
+    sr_var = 1e-4 if single else _sr_variance_from_matrix(inp.perf_matrix)
     dsr = deflated_sharpe_ratio(inp.oos_returns, inp.n_trials, sr_variance=sr_var)
     checks["dsr_gt_0_at_95"] = dsr > 0.95
     detail["dsr_gt_0_at_95"] = f"DSR={dsr:.3f} (need > 0.95)"
 
-    pbo_res = pbo_cscv(inp.perf_matrix, s=min(10, _even(inp.perf_matrix.shape[0])))
-    checks["pbo_lt_0_5"] = pbo_res.pbo < 0.5
-    detail["pbo_lt_0_5"] = f"PBO={pbo_res.pbo:.3f} (need < 0.5)"
+    if single:
+        # One frozen, pre-registered configuration has no selection step to overfit, so PBO is
+        # undefined. That is only legitimate if exactly one trial was counted; otherwise a
+        # selection happened elsewhere and "n/a" would hide it.
+        ok = inp.n_trials == 1
+        pbo_val = 0.0 if ok else 1.0
+        checks["pbo_lt_0_5"] = ok
+        detail["pbo_lt_0_5"] = (
+            "n/a: single pre-registered configuration (n_trials=1)" if ok else
+            f"cannot compute PBO from one configuration but n_trials={inp.n_trials} (selection happened)"
+        )
+        pbo_res = type("P", (), {"pbo": pbo_val})()
+    else:
+        pbo_res = pbo_cscv(inp.perf_matrix, s=min(10, _even(inp.perf_matrix.shape[0])))
+        checks["pbo_lt_0_5"] = pbo_res.pbo < 0.5
+        detail["pbo_lt_0_5"] = f"PBO={pbo_res.pbo:.3f} (need < 0.5)"
 
     path_exp = [s.mean() for s in inp.cpcv_path_returns if len(s)]
     checks["every_cpcv_path_positive"] = len(path_exp) > 0 and all(e > 0 for e in path_exp)
