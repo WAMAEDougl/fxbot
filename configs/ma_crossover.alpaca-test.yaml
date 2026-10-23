@@ -1,0 +1,36 @@
+# PIPELINE TEST ONLY (paper). Very fast averages on 5-minute bars so the strategy
+# crosses several times per US session, exercising order -> bracket -> fill ->
+# reconcile -> alert against Alpaca. It has no edge; do not run it with real money.
+# Start/stop with deploy/pipeline-test.sh (keeps the daily journal separate).
+strategy_id: ma_crossover_test
+strategy_class: "strategies.ma_crossover:MaCrossover"
+
+params:
+  strategy_id: ma_crossover_test
+  symbols: ["AAPL", "MSFT"]
+  fast: 3
+  slow: 8
+  atr_window: 5
+  stop_atr_mult: 2.0
+  target_rr: 2.0
+  allow_short: true
+  conviction: 1.0
+  seed: 0
+
+backtest:
+  starting_equity: 100000
+  interval: "5m"
+  risk:
+    risk_fraction: 0.001      # small: ~$100 risked per trade
+    max_risk_fraction: 0.002
+    daily_loss_limit: 0.03
+    max_trades_per_day: 4
+  costs:
+    spread_bps: 2.0
+    commission_bps: 0.0
+    swap_bps_per_day: 0.0
+    impact_coef: 0.1
+    latency_bars: 1
+  instruments:
+    AAPL: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }
+    MSFT: { value_per_point: 1.0, lot_step: 1.0, min_lot: 1.0, margin_rate: 0.5 }

@@ -103,6 +103,17 @@ async def test_warmup_trades_nothing_and_partial_bar_is_ignored(tmp_path):
     assert runner._cursor["AAPL"] == bars[-2].ts  # last *complete* bar, not today's
 
 
+async def test_no_warmup_bars_does_not_replay_history_as_live(tmp_path):
+    """Intraday with the market closed: warmup sees nothing. The first poll must not
+    publish the feed's older bars as if they were new."""
+    feed_bars = _bars(10, extra_partial=False)
+    runner, clock = _runner(tmp_path, [])
+    await runner.start()
+    runner.feed.bars = feed_bars  # history appears (older than the cursor)
+    assert await runner.poll_once() == 0
+    assert runner.broker.submitted == []
+
+
 async def test_new_completed_bar_produces_bracketed_order_once(tmp_path):
     bars = _bars(10, extra_partial=False)
     runner, clock = _runner(tmp_path, bars)

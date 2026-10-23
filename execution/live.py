@@ -167,6 +167,10 @@ class LiveRunner:
                     s.on_market_data(b, self.portfolio)  # signals discarded
             if bars:
                 self._set_cursor(sym, saved_ts if saved_ts else bars[-1].ts)
+            else:
+                # No bars (e.g. market closed on intraday): never fall through to
+                # poll_once's 10-day lookback, which would trade stale history.
+                self._set_cursor(sym, saved_ts if saved_ts else now - step)
         pending.sort(key=lambda b: (b.ts, b.symbol))
         return pending
 

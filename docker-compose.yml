@@ -9,11 +9,20 @@
 #
 # IB Gateway uses IBC (via gnzsnz/ib-gateway) because IBKR has no headless API.
 # Weekly 2FA: approve the IBKR Mobile prompt after the Saturday-night reset.
+# Logs go to the host's systemd journal, so they survive container recreation
+# (json-file logs are deleted with the container). Read them with:
+#   docker compose logs engine            (this container)
+#   journalctl CONTAINER_NAME=fxbot-engine-1  (all runs, incl. removed containers)
+x-journald: &journald
+  driver: journald
+  options: { tag: "fxbot-{{.Name}}" }
+
 services:
   gateway:
     profiles: ["ibkr"]
     image: ghcr.io/gnzsnz/ib-gateway:stable
     restart: always
+    logging: *journald
     environment:
       TWS_USERID: ${IB_USER}
       TWS_PASSWORD: ${IB_PASSWORD}
@@ -32,6 +41,7 @@ services:
     profiles: ["engine"]
     build: .
     restart: unless-stopped
+    logging: *journald
     env_file: [.env]
     environment:
       IB_HOST: gateway  # only used when TS_BROKER=ibkr
