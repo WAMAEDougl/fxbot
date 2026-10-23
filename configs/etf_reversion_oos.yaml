@@ -21,6 +21,11 @@ params:
   resignal_gap_bars: 3
   seed: 0
 
+# read by scripts/daily_status.py (progress line in the daily Telegram message)
+forward_test:
+  start: "2026-10-23T12:11:00Z"   # exploratory paper test, see research/hypotheses/etf_reversion.md
+  note: not promoted
+
 research:
   grid:            # exactly one cell: the frozen configuration
     rsi_entry: [15.0]

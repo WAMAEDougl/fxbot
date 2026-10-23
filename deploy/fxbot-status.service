@@ -1,0 +1,9 @@
+[Unit]
+Description=fxbot daily status to Telegram
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/fxbot
+ExecStart=/usr/bin/docker compose --profile engine run --rm --no-deps -T engine python -m scripts.daily_status
