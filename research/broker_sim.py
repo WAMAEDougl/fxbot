@@ -84,8 +84,65 @@ class BacktestBroker:
 
     # -- per-bar processing ------------------------------------- #
     async def _on_market_data(self, bar: MarketData) -> None:
+        # Closes work at the OPEN, so they run before this bar's stop/target check.
+        await self._process_closes(bar)
         await self._process_brackets(bar)
         await self._process_pending(bar)
+
+    async def _process_closes(self, bar: MarketData) -> None:
+        """Reduce-only market orders: close the open position at the bar's open."""
+        still: list[_Pending] = []
+        for p in self._pending:
+            o = p.order
+            if not o.reduce_only or o.symbol != bar.symbol:
+                still.append(p)
+                continue
+            p.bars_waited += 1
+            if p.bars_waited < self.model.latency_bars:
+                still.append(p)
+                continue
+            br = self._brackets.get(o.symbol)
+            if br is None:  # already stopped out / flat: a close must never open a position
+                rej = Rejection(
+                    ts=bar.ts, reason_code="NO_POSITION", origin="broker",
+                    originating_event_id=o.event_id,
+                    detail="close arrived after the position was already closed",
+                    symbol=o.symbol, strategy_id=o.strategy_id,
+                )
+                self.rejections.append(rej)
+                await self.bus.publish(rej)
+                continue
+            qty = min(o.qty, br.qty)
+            ref = bar.open if bar.open is not None else bar.price
+            thin = bar.ts.hour in self.thin_hours
+            half_spread = self.model.spread_at(ref, thin_session=thin) / 2.0
+            fill_price = (
+                ref
+                + (half_spread if o.side is Side.BUY else -half_spread)
+                + self.model.slippage(ref, qty, bar.volume or 0.0, o.side)
+            )
+            fees = self.model.commission(fill_price * qty)
+            await self.bus.publish(
+                Fill(ts=bar.ts, order_id=o.client_order_id, symbol=o.symbol, side=o.side,
+                     price=fill_price, qty=qty, fees=fees, strategy_id=o.strategy_id)
+            )
+            vpp = self.vpp.get(o.symbol, 1.0)
+            sign = 1.0 if br.side is Side.BUY else -1.0
+            gross = (fill_price - br.entry_price) * sign * qty * vpp
+            rpu = abs(br.entry_price - br.stop) * vpp
+            self.trades.append(
+                TradeRecord(
+                    symbol=o.symbol, strategy_id=br.strategy_id,
+                    direction="long" if br.side is Side.BUY else "short",
+                    entry_ts=br.opened_ts, exit_ts=bar.ts,
+                    entry_price=br.entry_price, exit_price=fill_price, qty=qty,
+                    pnl=gross - fees, fees=fees,
+                    r_multiple=gross / (rpu * qty) if rpu > 0 else 0.0,
+                    exit_reason="SIGNAL",
+                )
+            )
+            del self._brackets[o.symbol]
+        self._pending = still
 
     async def _process_brackets(self, bar: MarketData) -> None:
         br = self._brackets.get(bar.symbol)
@@ -155,7 +212,7 @@ class BacktestBroker:
         still: list[_Pending] = []
         for p in self._pending:
             o = p.order
-            if o.symbol != bar.symbol:
+            if o.symbol != bar.symbol or o.reduce_only:  # closes are handled in _process_closes
                 still.append(p)
                 continue
             if o.ttl is not None and bar.ts > o.ttl:

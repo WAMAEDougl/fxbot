@@ -157,11 +157,21 @@ class Order(Event):
     strategy_id: str = ""
     signal_id: str = ""
     features_hash: str = ""
+    # A reduce-only order can only CLOSE an existing position (never open or add),
+    # so it is the one kind of order allowed without a bracket: it cannot add risk.
+    # Everything that can add risk still needs both a stop-loss and a take-profit.
+    reduce_only: bool = False
 
     def __post_init__(self) -> None:
         Event.__post_init__(self)  # not super(): zero-arg super breaks under slots=True on 3.12
         if self.qty <= 0:
             raise ValueError(f"order qty must be positive, got {self.qty}")
+        if self.reduce_only:
+            if self.order_type is not OrderType.MARKET or self.limit_price is not None:
+                raise ValueError("reduce-only orders must be plain market orders")
+            if self.stop_loss is not None or self.take_profit is not None:
+                raise ValueError("reduce-only orders carry no bracket (they only close)")
+            return
         # Bracket enforcement (design 4.4): no naked orders reach the OMS.
         if self.stop_loss is None or self.take_profit is None:
             raise ValueError(

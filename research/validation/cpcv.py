@@ -120,6 +120,7 @@ def cpcv_paths(
 def _group_segment(os_series: pd.Series, combo: tuple[int, ...], g: int) -> pd.Series:
     """Given the concatenated OS series for a split and which test groups it
     covered, return just group ``g``'s slice. Assumes equal-ish group sizes."""
-    parts = np.array_split(os_series, len(combo))
-    pos = combo.index(g)
-    return parts[pos]
+    # split by position, not the Series itself: np.array_split(Series) returns bare
+    # ndarrays on current pandas/numpy, which loses the index.
+    parts = np.array_split(np.arange(len(os_series)), len(combo))
+    return os_series.iloc[parts[combo.index(g)]]

@@ -44,7 +44,8 @@ _ALLOWED: dict[OrderStatus, set[OrderStatus]] = {
 
 # broker error classification
 RETRYABLE = {"timeout", "rate_limit", "5xx", "connection_reset"}
-TERMINAL_ERR = {"insufficient_funds", "invalid_symbol", "market_closed", "duplicate_rejected"}
+TERMINAL_ERR = {"insufficient_funds", "invalid_symbol", "market_closed", "duplicate_rejected",
+                "no_position", "unsupported"}
 
 
 @dataclass(slots=True)

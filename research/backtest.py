@@ -141,6 +141,18 @@ class Backtester:
         return self._assemble(portfolio, broker, rejections, counters)
 
     # ------------------------------------------------------------------ #
+    def _free_margin(self, portfolio: Portfolio) -> float:
+        """Equity minus the margin already tied up in open positions, so the margin gate
+        sees TOTAL exposure. (It used to compare one order against all of equity, which
+        let gross exposure pile up to 3.5x on a 2x account.)"""
+        used = 0.0
+        for sym in portfolio.open_symbols():
+            hist = portfolio.history(sym, 1)
+            if hist:
+                used += (abs(portfolio.position(sym)) * hist[-1].price * portfolio.vpp(sym)
+                         * self._spec(sym).margin_rate)
+        return max(0.0, portfolio.equity - used)
+
     def _market_state_fn(self, portfolio: Portfolio, clock: SimClock):
         cfg = self.cfg
         interval = _INTERVAL.get(cfg.interval, timedelta(days=1))
@@ -181,7 +193,7 @@ class Backtester:
                     min_lot=spec.min_lot,
                     max_lot=spec.max_lot,
                 ),
-                margin_available=portfolio.equity / max(spec.margin_rate, 1e-9),
+                margin_available=self._free_margin(portfolio),
                 margin_rate=spec.margin_rate,
                 high_impact_event=False,
             )

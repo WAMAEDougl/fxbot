@@ -42,6 +42,16 @@ class RiskConfig:
     max_risk_fraction: float = 0.01  # 1% standard max
     default_stop_atr_mult: float = 2.0
     order_ttl: timedelta = timedelta(days=1)
+    # YAML-friendly override (timedeltas can't be written in YAML). Daily strategies need
+    # >= 4 days or a Friday signal expires before Monday's open and silently never trades.
+    order_ttl_days: float | None = None
+    # a repeated close for the same unchanged position inside this window is a
+    # duplicate (the first one is still in flight), not a second close
+    close_pending_ttl: timedelta = timedelta(days=3)
+
+    def __post_init__(self) -> None:
+        if self.order_ttl_days is not None:
+            self.order_ttl = timedelta(days=self.order_ttl_days)
 
 
 @dataclass(slots=True)
@@ -83,13 +93,16 @@ class RiskManager:
         self.cfg = cfg or RiskConfig()
         self.limits = limits or LimitBook()
         self._kill_switch = kill_switch
+        self._pending_close: dict[str, tuple[float, datetime]] = {}  # symbol -> (position, ts)
 
     # ---------------------------------------------------------------- #
     def evaluate(self, signal: Signal, ctx, market: MarketState) -> RiskDecision:
         self.limits.roll_day(ctx.now, ctx.equity)
+        if signal.direction is Direction.FLAT:
+            return self._close_decision(signal, ctx)
         entry, stop, target, side = self._geometry(signal, ctx, market)
 
-        if side is None:  # FLAT / no-op
+        if side is None:  # no-op
             return RiskDecision(None, self._reject(signal, "NO_OP", "flat signal, nothing to do"), [])
 
         # provisional size for risk-based gates (correlation, margin)
@@ -160,6 +173,39 @@ class RiskManager:
             features_hash=signal.features_hash,
         )
         return RiskDecision(order, None, trace)
+
+    # ---------------------------------------------------------------- #
+    def _close_decision(self, signal: Signal, ctx) -> RiskDecision:
+        """FLAT signal -> reduce-only market order that closes the whole position.
+
+        Deliberately bypasses the entry gates (kill switch, trade cap, loss limit,
+        margin, ...): closing only reduces risk, and a halted system must still be
+        able to get out. The only guards are "is there a position" and "is a close
+        already in flight", so a close can never open or flip a position.
+        """
+        pos = ctx.position(signal.symbol)
+        if pos == 0.0:
+            return RiskDecision(None, self._reject(signal, "NO_OP", "flat signal, no position"), [])
+        prev = self._pending_close.get(signal.symbol)
+        if prev is not None and prev[0] == pos and ctx.now - prev[1] < self.cfg.close_pending_ttl:
+            return RiskDecision(
+                None, self._reject(signal, "DUPLICATE_CLOSE", "a close is already in flight"), []
+            )
+        self._pending_close[signal.symbol] = (pos, ctx.now)
+        order = Order(
+            ts=ctx.now,
+            client_order_id=self._coid(signal),
+            symbol=signal.symbol,
+            side=Side.SELL if pos > 0 else Side.BUY,
+            qty=abs(pos),
+            order_type=OrderType.MARKET,
+            tif=TimeInForce.DAY,
+            strategy_id=signal.strategy_id,
+            signal_id=signal.event_id,
+            features_hash=signal.features_hash,
+            reduce_only=True,
+        )
+        return RiskDecision(order, None, [])
 
     # ---------------------------------------------------------------- #
     def _geometry(self, signal: Signal, ctx, market: MarketState):

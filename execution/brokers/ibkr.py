@@ -53,6 +53,11 @@ class IbkrBroker:
         await self._ib.connectAsync(self.host, self.port, clientId=self.client_id)
 
     async def submit(self, order: Order) -> str:
+        if order.reduce_only:
+            # Closing needs the protective bracket children cancelled first and restored
+            # on failure (see AlpacaBroker._submit_close). Not built or tested for IBKR,
+            # so refuse loudly (terminal, alerts) rather than half-work.
+            raise RuntimeError("unsupported: reduce-only closes are not implemented for IBKR")
         await self.connect()
         assert self._ib is not None
         if order.client_order_id in self._coid_to_broker:

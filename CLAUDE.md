@@ -47,7 +47,7 @@ Strategies live one package each under `strategies/<name>/` (strategy + pydantic
 ## Invariants (enforced in code and tests — don't weaken)
 
 - `Signal` has no qty/side; only the risk manager builds an `Order`.
-- `Order` without both stop-loss and take-profit raises at construction (`Order.__post_init__`).
+- `Order` without both stop-loss and take-profit raises at construction (`Order.__post_init__`). The one exception is a `reduce_only` order, which can only close an existing position and must carry no bracket; the risk manager builds it from a FLAT signal (bypassing the entry gates so a halted system can still exit), and broker adapters must cancel the protective legs before closing and restore them if the close fails.
 - Position size is derived from `risk_amount / (stop_distance × value_per_point)`, never configured; hard cap 2% of equity.
 - Timestamps must be tz-aware UTC (events reject naive/non-UTC).
 - Bus dispatch is deterministic (handlers fire in subscription order; `publish` drains cascades). A raising handler is captured and routed to the error hook (used to disable a crashing strategy), not propagated.
