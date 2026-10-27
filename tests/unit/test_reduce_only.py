@@ -229,3 +229,77 @@ def test_oms_treats_unsupported_and_no_position_as_terminal_not_retryable():
     assert {"no_position", "unsupported"} <= TERMINAL_ERR
     assert _classify(RuntimeError("no_position: nothing to close")) == "no_position"
     assert _classify(RuntimeError("unsupported: reduce-only")) == "unsupported"
+
+
+# --- shape captured from a REAL Alpaca paper position (EWJ): status=open shows only the
+# take-profit leg; the stop leg is "held" and appears only in the nested listing -----------
+_REAL_NESTED = [{
+    "id": "P1", "type": "market", "side": "buy", "qty": "144", "status": "filled",
+    "legs": [
+        {"id": "T1", "type": "limit", "side": "sell", "qty": "144", "status": "new",
+         "limit_price": "128.52", "stop_price": None},
+        {"id": "S1", "type": "stop", "side": "sell", "qty": "144", "status": "held",
+         "stop_price": "90.66", "limit_price": None},
+    ],
+}]
+
+
+def _routes(extra=None):
+    r = {
+        ("GET", "/v2/positions/EWJ"): [(200, {"qty": "144", "side": "long", "qty_available": "0"}),
+                                       (200, {"qty": "144", "side": "long", "qty_available": "0"}),
+                                       (200, {"qty": "144", "side": "long", "qty_available": "144"})],
+        ("GET", "/v2/orders"): (200, _REAL_NESTED),
+        ("DELETE", "/v2/orders/T1"): (200, None),
+        ("DELETE", "/v2/orders/S1"): (200, None),
+        ("POST", "/v2/orders"): (200, {"id": "X9"}),
+    }
+    r.update(extra or {})
+    return r
+
+
+async def test_close_cancels_the_HELD_stop_leg_too_not_only_the_visible_take_profit():
+    b, f = _broker(_routes())
+    assert await b.submit(_close(symbol="EWJ", qty=144)) == "X9"
+    deleted = [p for m, p, _ in f.calls if m == "DELETE"]
+    assert sorted(deleted) == ["/v2/orders/S1", "/v2/orders/T1"]
+    assert [c for c in f.calls if c[0] == "GET" and c[1] == "/v2/orders"], "must list orders"
+
+
+async def test_failed_close_restores_BOTH_prices_from_the_real_bracket_shape():
+    b, f = _broker(_routes({("POST", "/v2/orders"): [(403, {"message": "halted"}),
+                                                     (200, {"id": "R9"})]}))
+    with pytest.raises(AlpacaError):
+        await b.submit(_close(symbol="EWJ", qty=144))
+    restore = [c[2] for c in f.calls if c[0] == "POST"][1]
+    assert restore["order_class"] == "oco"
+    assert restore["stop_loss"] == {"stop_price": "90.66"}  # the held leg must not be lost
+    assert restore["take_profit"] == {"limit_price": "128.52"}
+
+
+async def test_finished_legs_and_entry_side_orders_are_not_treated_as_protection():
+    nested = [{
+        "id": "P0", "type": "market", "side": "buy", "qty": "50", "status": "filled",
+        "legs": [{"id": "OLD1", "type": "limit", "side": "sell", "qty": "50", "status": "canceled",
+                  "limit_price": "120.00"},
+                 {"id": "OLD2", "type": "stop", "side": "sell", "qty": "50", "status": "filled",
+                  "stop_price": "80.00"}],
+    }, {"id": "PEND", "type": "limit", "side": "buy", "qty": "5", "status": "new",
+        "limit_price": "70.00", "legs": []}] + _REAL_NESTED
+    b, f = _broker(_routes({("GET", "/v2/orders"): (200, nested)}))
+    await b.submit(_close(symbol="EWJ", qty=144))
+    assert sorted(p for m, p, _ in f.calls if m == "DELETE") == ["/v2/orders/S1", "/v2/orders/T1"]
+
+
+async def test_an_oco_order_restored_earlier_is_found_and_cancelled_as_well():
+    """After a failed close the adapter re-creates the stop/target as an OCO: its top-level order
+    is the take-profit and the stop sits in its legs. A later close must find both."""
+    oco = [{"id": "O1", "type": "limit", "side": "sell", "qty": "144", "status": "new",
+            "limit_price": "128.52", "order_class": "oco",
+            "legs": [{"id": "O2", "type": "stop", "side": "sell", "qty": "144", "status": "held",
+                      "stop_price": "90.66"}]}]
+    b, f = _broker(_routes({("GET", "/v2/orders"): (200, oco),
+                            ("DELETE", "/v2/orders/O1"): (200, None),
+                            ("DELETE", "/v2/orders/O2"): (200, None)}))
+    await b.submit(_close(symbol="EWJ", qty=144))
+    assert sorted(p for m, p, _ in f.calls if m == "DELETE") == ["/v2/orders/O1", "/v2/orders/O2"]

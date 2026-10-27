@@ -41,6 +41,10 @@ from data.adapters.alpaca import (
     _iso,
 )
 
+# order states that are finished (or already being cancelled): not protection any more
+_FINISHED = {"filled", "canceled", "expired", "rejected", "done_for_day", "replaced",
+             "pending_cancel", "suspended", "stopped"}
+
 
 class AlpacaBroker:
     broker = "alpaca"
@@ -122,22 +126,22 @@ class AlpacaBroker:
             raise RuntimeError(f"no_position: {order.side.value} would not reduce {symbol} ({pos:g})")
         qty = min(order.qty, abs(pos))
 
-        # 1. take the protective legs off (they hold the shares), remembering them
-        open_orders = await self.http.request(
-            "GET", f"{self.base}/v2/orders", params={"status": "open", "symbols": symbol,
-                                                     "limit": 50}) or []
+        # 1. take the protective legs off (they hold the shares), remembering them. Use the
+        # nested listing: status=open only returns the live take-profit leg of a bracket, the
+        # stop leg waits in state "held" and is invisible there (seen on a real EWJ position).
+        protective = await self._protective_orders(symbol, order.side)
         legs = [
             {"type": o["type"], "qty": o["qty"],
              "price": o.get("stop_price") if o["type"] == "stop" else o.get("limit_price")}
-            for o in open_orders  # every open order on this symbol is a protective leg
+            for o in protective
         ]
         if legs:
             self._saved_protection[symbol] = legs
-        for o in open_orders:
+        for o in protective:
             try:
                 await self.http.request("DELETE", f"{self.base}/v2/orders/{o['id']}")
             except AlpacaError as exc:
-                if exc.status not in (404, 422):  # already filled / gone
+                if exc.status not in (404, 422):  # already filled / gone / cancelled with its sibling
                     raise
         try:
             await self._wait_available(symbol, qty)
@@ -163,6 +167,27 @@ class AlpacaBroker:
         self._order_to_coid[broker_id] = order.client_order_id
         self._saved_protection.pop(symbol, None)
         return broker_id
+
+    async def _protective_orders(self, symbol: str, exit_side: Side) -> list[dict]:
+        """Every not-yet-finished stop/limit order on ``symbol`` that would REDUCE the position
+        (side == ``exit_side``), including bracket/OCO legs in state "held"."""
+        listed = await self.http.request(
+            "GET", f"{self.base}/v2/orders",
+            params={"status": "all", "symbols": symbol, "nested": "true", "limit": 100,
+                    "direction": "desc",
+                    "after": _iso(datetime.now(UTC) - timedelta(days=60))}) or []
+        found: dict[str, dict] = {}
+
+        def consider(o: dict) -> None:
+            if (o.get("status") not in _FINISHED and o.get("side") == exit_side.value
+                    and o.get("type") in ("stop", "limit", "stop_limit")):
+                found[o["id"]] = o
+
+        for o in listed:
+            consider(o)
+            for leg in o.get("legs") or []:
+                consider(leg)
+        return list(found.values())
 
     async def _wait_available(self, symbol: str, qty: float, tries: int = 20) -> None:
         """Cancels are asynchronous: wait until the shares are free to trade."""

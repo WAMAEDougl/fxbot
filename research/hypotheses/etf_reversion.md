@@ -133,3 +133,19 @@ no worse than 2x modelled, and no unreconciled position drift.
 **Stop immediately if:** any position is ever left without protective orders (the adapter raises
 "CRITICAL: close ... AND protection could not be restored"), the kill switch trips for a reason
 other than market stress, or the account draws down more than 15%.
+
+---
+## Forward-test log
+
+**2026-10-27: first live trade, and a bug found before the first close.** The strategy bought
+144 EWJ (about $94.41, filled in 7 pieces) as a bracket (stop 90.66, take-profit 128.52). Inspecting
+the real position showed Alpaca lists only the take-profit leg under `status=open`; the stop leg is
+`held` and appears only in the nested listing. The close code (written against a simplified fake)
+would have cancelled one leg, never captured the stop, and on a failed close could have restored
+only half the protection, which breaks the stop-immediately rule above. Fixed BEFORE any close:
+legs are now found through the nested listing (new/held, exit side only; finished legs ignored),
+with tests built from the real structure. Verified read-only on the live position (finds both legs),
+engine restarted on the fix, position adopted and still protected.
+Note: the strategy's time-stop clock (10 bars) restarts when the engine restarts, so EWJ's
+time-stop is counted from 2026-10-27 at the latest; the recovery exit is unaffected.
+One transient warning so far: a DNS failure in the fill poller (2026-10-27 08:40 UTC), retried.
