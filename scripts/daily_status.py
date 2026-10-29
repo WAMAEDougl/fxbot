@@ -25,13 +25,16 @@ import numpy as np
 import yaml
 
 from data.adapters.alpaca import LIVE_URL, PAPER_URL, AlpacaFeed, AlpacaHttp
+from execution.brokers.alpaca import AlpacaBroker
 from ops.status import (
     StatusFacts,
     engine_health,
     format_alert,
     format_status,
+    orphan_orders,
     round_trips,
     send_telegram,
+    unprotected_positions,
 )
 
 
@@ -98,12 +101,33 @@ async def _closest(spec: dict) -> tuple[list[tuple[str, float]], float | None]:
     return sorted(rows, key=lambda r: r[1]), float(p["rsi_entry"])
 
 
+async def _protection_problems(env: str) -> tuple[list[str], list[str]]:
+    """(positions with no live stop, live exit orders with no position to reduce). If the broker
+    cannot be read, report nothing: a network blip must not raise a false alarm, and the next
+    run checks again."""
+    try:
+        broker = AlpacaBroker(env=env)
+        positions = await broker.positions()
+        live = await broker.live_exit_orders()
+        with_stop = {sym for sym, legs in live.items()
+                     for o in legs if o["type"] in ("stop", "stop_limit")
+                     and o["side"] == ("sell" if positions.get(sym, 0.0) > 0 else "buy")}
+        unprot = unprotected_positions(
+            [{"symbol": s_, "qty": q} for s_, q in positions.items()], with_stop)
+        return unprot, orphan_orders(positions, live)
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not check protection: {exc!r}", file=sys.stderr)
+        return [], []
+
+
 async def _run(args) -> int:
     env = os.environ.get("TS_ENV", "paper")
     state = Path(os.environ.get("TS_STATE_DIR", "state"))
     now = datetime.now(UTC)
     kill = Path(os.environ.get("TS_KILLSWITCH_FILE", str(state / "HALT"))).exists()
-    health = engine_health(time.time(), _heartbeat(state / "healthy"), kill)
+    unprot, orphans = await _protection_problems(env)
+    health = engine_health(time.time(), _heartbeat(state / "healthy"), kill,
+                           unprotected=unprot, orphans=orphans)
 
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
 

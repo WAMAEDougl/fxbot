@@ -103,6 +103,51 @@ def test_active_day_lists_positions_fills_and_trade_stats():
 
 def test_unhealthy_status_leads_with_the_problem():
     bad = Health(False, ["heartbeat is 900s old (limit 180s)"], 900.0)
-    assert "ENGINE PROBLEM: heartbeat is 900s old" in format_status(_facts(health=bad))
+    assert "PROBLEM: heartbeat is 900s old" in format_status(_facts(health=bad))
     alert = format_alert("paper", NOW, bad)
-    assert "WATCHDOG" in alert and "ENGINE PROBLEM" in alert
+    assert "WATCHDOG" in alert and "PROBLEM" in alert
+
+
+# ------------------------------------------------------- unprotected positions #
+def test_position_without_a_stop_is_listed_and_one_with_a_stop_is_not():
+    from ops.status import unprotected_positions
+
+    pos = [{"symbol": "EWJ", "qty": 144.0}, {"symbol": "EWU", "qty": 351.0},
+           {"symbol": "XLK", "qty": -20.0}]
+    assert unprotected_positions(pos, {"EWU"}) == ["EWJ 144 sh", "XLK 20 sh"]
+    assert unprotected_positions(pos, {"EWJ", "EWU", "XLK"}) == []
+    assert unprotected_positions([], set()) == []
+
+
+def test_an_unprotected_position_makes_the_engine_unhealthy_even_with_a_fresh_heartbeat():
+    h = engine_health(1000.0, 995.0, False, True, unprotected=["EWJ 144 sh"])
+    assert not h.ok and "UNPROTECTED POSITION" in h.reasons[0] and "EWJ 144 sh" in h.reasons[0]
+    msg = format_alert("paper", NOW, h)
+    assert "WATCHDOG" in msg and "UNPROTECTED POSITION" in msg
+    assert engine_health(1000.0, 995.0, False, True, unprotected=[]).ok
+
+
+# ---------------------------------------------------------------- orphan orders #
+def test_a_stop_left_behind_after_its_position_closed_is_an_orphan():
+    from ops.status import orphan_orders
+
+    live = {"EWJ": [{"type": "stop", "side": "sell", "qty": "144"}],
+            "EWU": [{"type": "limit", "side": "sell", "qty": "351"},
+                    {"type": "stop", "side": "sell", "qty": "351"}]}
+    assert orphan_orders({"EWU": 351.0}, live) == ["EWJ stop sell 144"]
+    assert orphan_orders({"EWU": 351.0, "EWJ": 144.0}, live) == []
+    assert orphan_orders({}, {}) == []
+
+
+def test_an_exit_order_on_the_wrong_side_of_the_position_is_an_orphan():
+    from ops.status import orphan_orders
+
+    # a sell stop against a SHORT would ADD to it; a buy stop against a long likewise
+    assert orphan_orders({"A": -10.0}, {"A": [{"type": "stop", "side": "sell", "qty": "10"}]})
+    assert orphan_orders({"A": 10.0}, {"A": [{"type": "stop", "side": "buy", "qty": "10"}]})
+    assert not orphan_orders({"A": -10.0}, {"A": [{"type": "stop", "side": "buy", "qty": "10"}]})
+
+
+def test_an_orphan_makes_the_engine_unhealthy():
+    h = engine_health(1000.0, 995.0, False, True, orphans=["EWJ stop sell 144"])
+    assert not h.ok and "ORPHAN ORDER" in h.reasons[0]

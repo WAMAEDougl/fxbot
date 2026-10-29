@@ -124,7 +124,7 @@ def test_entry_signals_still_always_carry_a_bracket():
 
 # ------------------------------------------------------------ Alpaca close #
 class _Fake:
-    """Routes (method, path) -> (status, json) or a list consumed in order."""
+    """Routes (method, path) -> (status, json) or a list consumed in order. Records calls."""
 
     def __init__(self, routes):
         self.routes, self.calls = routes, []
@@ -140,100 +140,17 @@ class _Fake:
 def _broker(routes):
     fake = _Fake(routes)
     b = AlpacaBroker(http=AlpacaHttp(transport=fake))
+    b.verify_wait_s = 0.0  # no real sleeping in tests
     return b, fake
 
 
-_LONG = {"qty": "10", "side": "long", "qty_available": "0"}
-_FREE = {"qty": "10", "side": "long", "qty_available": "10"}
-_LEGS = [
-    {"id": "S1", "type": "stop", "side": "sell", "qty": "10", "stop_price": "95.00"},
-    {"id": "T1", "type": "limit", "side": "sell", "qty": "10", "limit_price": "110.00"},
-]
+def _kinds(f, *methods):
+    return [(m, p) for m, p, _ in f.calls if m in methods]
 
 
-async def test_close_cancels_legs_first_then_sends_a_market_order_without_bracket():
-    b, f = _broker({
-        ("GET", "/v2/positions/AAPL"): [(200, _LONG), (200, _LONG), (200, _FREE)],
-        ("GET", "/v2/orders"): (200, _LEGS),
-        ("DELETE", "/v2/orders/S1"): (200, None),
-        ("DELETE", "/v2/orders/T1"): (200, None),
-        ("POST", "/v2/orders"): (200, {"id": "X1"}),
-    })
-    assert await b.submit(_close()) == "X1"
-    kinds = [(m, p) for m, p, _ in f.calls if m in ("DELETE", "POST")]
-    assert kinds == [("DELETE", "/v2/orders/S1"), ("DELETE", "/v2/orders/T1"),
-                     ("POST", "/v2/orders")]  # legs off BEFORE the close
-    body = [c[2] for c in f.calls if c[0] == "POST"][0]
-    assert body["side"] == "sell" and body["qty"] == "10" and body["type"] == "market"
-    assert "order_class" not in body and "stop_loss" not in body and "take_profit" not in body
-    assert body["client_order_id"] == "c"
-    assert await b.submit(_close()) == "X1"  # idempotent: no second POST
-    assert len([c for c in f.calls if c[0] == "POST"]) == 1
-
-
-async def test_close_with_no_position_is_a_terminal_error_not_a_retry_loop():
-    b, _ = _broker({("GET", "/v2/positions/AAPL"): (404, {"message": "position does not exist"})})
-    with pytest.raises(RuntimeError, match="no_position"):
-        await b.submit(_close())
-
-
-async def test_close_in_the_wrong_direction_is_refused_so_it_cannot_flip_a_position():
-    b, f = _broker({("GET", "/v2/positions/AAPL"): (200, _FREE)})
-    with pytest.raises(RuntimeError, match="no_position"):
-        await b.submit(_close(side=Side.BUY))  # would ADD to a long
-    assert not [c for c in f.calls if c[0] in ("POST", "DELETE")]
-
-
-async def test_close_quantity_is_capped_at_the_actual_position():
-    b, f = _broker({
-        ("GET", "/v2/positions/AAPL"): [(200, _LONG), (200, _FREE)],
-        ("GET", "/v2/orders"): (200, []),
-        ("POST", "/v2/orders"): (200, {"id": "X2"}),
-    })
-    await b.submit(_close(qty=99))
-    assert [c[2] for c in f.calls if c[0] == "POST"][0]["qty"] == "10"
-
-
-async def test_failed_close_restores_the_protective_orders():
-    b, f = _broker({
-        ("GET", "/v2/positions/AAPL"): [(200, _LONG), (200, _FREE)],
-        ("GET", "/v2/orders"): (200, _LEGS),
-        ("DELETE", "/v2/orders/S1"): (200, None),
-        ("DELETE", "/v2/orders/T1"): (200, None),
-        ("POST", "/v2/orders"): [(403, {"message": "trading halted"}), (200, {"id": "R1"})],
-    })
-    with pytest.raises(AlpacaError):
-        await b.submit(_close())
-    restore = [c[2] for c in f.calls if c[0] == "POST"][1]  # the second POST
-    assert restore["order_class"] == "oco" and restore["side"] == "sell"
-    assert restore["stop_loss"] == {"stop_price": "95.00"}
-    assert restore["take_profit"] == {"limit_price": "110.00"}
-    assert "AAPL" not in b._saved_protection  # restored, nothing left pending
-
-
-async def test_failed_close_and_failed_restore_is_loud():
-    b, _ = _broker({
-        ("GET", "/v2/positions/AAPL"): [(200, _LONG), (200, _FREE)],
-        ("GET", "/v2/orders"): (200, _LEGS),
-        ("DELETE", "/v2/orders/S1"): (200, None),
-        ("DELETE", "/v2/orders/T1"): (200, None),
-        ("POST", "/v2/orders"): [(403, {"message": "halted"}), (500, {"message": "down"})],
-    })
-    with pytest.raises(RuntimeError, match="CRITICAL"):
-        await b.submit(_close())
-
-
-def test_oms_treats_unsupported_and_no_position_as_terminal_not_retryable():
-    from execution.oms import TERMINAL_ERR, _classify
-
-    assert {"no_position", "unsupported"} <= TERMINAL_ERR
-    assert _classify(RuntimeError("no_position: nothing to close")) == "no_position"
-    assert _classify(RuntimeError("unsupported: reduce-only")) == "unsupported"
-
-
-# --- shape captured from a REAL Alpaca paper position (EWJ): status=open shows only the
-# take-profit leg; the stop leg is "held" and appears only in the nested listing -----------
-_REAL_NESTED = [{
+# Structure captured from a REAL Alpaca paper position (EWJ): the parent is filled, the
+# take-profit leg is "new", the stop leg is "held" and is invisible under status=open.
+_REAL = [{
     "id": "P1", "type": "market", "side": "buy", "qty": "144", "status": "filled",
     "legs": [
         {"id": "T1", "type": "limit", "side": "sell", "qty": "144", "status": "new",
@@ -244,62 +161,218 @@ _REAL_NESTED = [{
 }]
 
 
-def _routes(extra=None):
+def _long_pos(price="94.13", avail="0"):
+    return (200, {"qty": "144", "side": "long", "qty_available": avail, "current_price": price})
+
+
+def _close_routes(over=None):
     r = {
-        ("GET", "/v2/positions/EWJ"): [(200, {"qty": "144", "side": "long", "qty_available": "0"}),
-                                       (200, {"qty": "144", "side": "long", "qty_available": "0"}),
-                                       (200, {"qty": "144", "side": "long", "qty_available": "144"})],
-        ("GET", "/v2/orders"): (200, _REAL_NESTED),
-        ("DELETE", "/v2/orders/T1"): (200, None),
-        ("DELETE", "/v2/orders/S1"): (200, None),
-        ("POST", "/v2/orders"): (200, {"id": "X9"}),
+        ("GET", "/v2/positions/EWJ"): _long_pos(),
+        ("GET", "/v2/orders"): (200, _REAL),
+        ("PATCH", "/v2/orders/T1"): (200, {"id": "T2", "status": "new"}),
     }
-    r.update(extra or {})
+    r.update(over or {})
     return r
 
 
-async def test_close_cancels_the_HELD_stop_leg_too_not_only_the_visible_take_profit():
-    b, f = _broker(_routes())
-    assert await b.submit(_close(symbol="EWJ", qty=144)) == "X9"
-    deleted = [p for m, p, _ in f.calls if m == "DELETE"]
-    assert sorted(deleted) == ["/v2/orders/S1", "/v2/orders/T1"]
-    assert [c for c in f.calls if c[0] == "GET" and c[1] == "/v2/orders"], "must list orders"
+async def test_close_sells_through_the_take_profit_leg_and_never_cancels_protection():
+    """The 28 Oct failure: cancelling legs after hours is deferred, so the sell could not be
+    placed and the position ended up naked. The close must not cancel anything."""
+    b, f = _broker(_close_routes())
+    assert await b.submit(_close(symbol="EWJ", qty=144)) == "T2"
+    assert _kinds(f, "DELETE", "POST") == []  # no cancel, no new order
+    patch = [c for c in f.calls if c[0] == "PATCH"]
+    assert [c[1] for c in patch] == ["/v2/orders/T1"]
+    assert patch[0][2] == {"limit_price": "91.31"}  # 94.13 less 3%, still above the 90.66 stop
 
 
-async def test_failed_close_restores_BOTH_prices_from_the_real_bracket_shape():
-    b, f = _broker(_routes({("POST", "/v2/orders"): [(403, {"message": "halted"}),
-                                                     (200, {"id": "R9"})]}))
-    with pytest.raises(AlpacaError):
-        await b.submit(_close(symbol="EWJ", qty=144))
-    restore = [c[2] for c in f.calls if c[0] == "POST"][1]
-    assert restore["order_class"] == "oco"
-    assert restore["stop_loss"] == {"stop_price": "90.66"}  # the held leg must not be lost
-    assert restore["take_profit"] == {"limit_price": "128.52"}
+async def test_close_fill_is_attributed_to_the_close_order_not_the_entry():
+    b, _ = _broker(_close_routes())
+    await b.submit(_close(symbol="EWJ", qty=144, client_order_id="close-1"))
+    assert b._order_to_coid["T2"] == "close-1" and b._order_to_coid["T1"] == "close-1"
+    assert await b.submit(_close(symbol="EWJ", qty=144, client_order_id="close-1")) == "T2"  # idempotent
 
 
-async def test_finished_legs_and_entry_side_orders_are_not_treated_as_protection():
-    nested = [{
-        "id": "P0", "type": "market", "side": "buy", "qty": "50", "status": "filled",
-        "legs": [{"id": "OLD1", "type": "limit", "side": "sell", "qty": "50", "status": "canceled",
-                  "limit_price": "120.00"},
-                 {"id": "OLD2", "type": "stop", "side": "sell", "qty": "50", "status": "filled",
-                  "stop_price": "80.00"}],
-    }, {"id": "PEND", "type": "limit", "side": "buy", "qty": "5", "status": "new",
-        "limit_price": "70.00", "legs": []}] + _REAL_NESTED
-    b, f = _broker(_routes({("GET", "/v2/orders"): (200, nested)}))
+async def test_limit_is_kept_above_the_stop_when_the_price_is_close_to_it():
+    b, f = _broker(_close_routes({("GET", "/v2/positions/EWJ"): _long_pos(price="91.00")}))
     await b.submit(_close(symbol="EWJ", qty=144))
-    assert sorted(p for m, p, _ in f.calls if m == "DELETE") == ["/v2/orders/S1", "/v2/orders/T1"]
+    assert [c[2] for c in f.calls if c[0] == "PATCH"][0] == {"limit_price": "90.67"}  # stop + 0.01
 
 
-async def test_an_oco_order_restored_earlier_is_found_and_cancelled_as_well():
-    """After a failed close the adapter re-creates the stop/target as an OCO: its top-level order
-    is the take-profit and the stop sits in its legs. A later close must find both."""
+async def test_short_position_is_covered_through_its_target_with_the_limit_below_the_stop():
+    short = [{"id": "P1", "type": "market", "side": "sell", "qty": "50", "status": "filled", "legs": [
+        {"id": "T1", "type": "limit", "side": "buy", "qty": "50", "status": "new",
+         "limit_price": "80.00"},
+        {"id": "S1", "type": "stop", "side": "buy", "qty": "50", "status": "held",
+         "stop_price": "104.00"}]}]
+    b, f = _broker({
+        ("GET", "/v2/positions/XYZ"): (200, {"qty": "50", "side": "short", "qty_available": "0",
+                                              "current_price": "100.00"}),
+        ("GET", "/v2/orders"): (200, short),
+        ("PATCH", "/v2/orders/T1"): (200, {"id": "T2"}),
+    })
+    await b.submit(_close(symbol="XYZ", side=Side.BUY, qty=50))
+    assert [c[2] for c in f.calls if c[0] == "PATCH"][0] == {"limit_price": "103.00"}  # +3% < stop
+    assert _kinds(f, "DELETE", "POST") == []
+
+
+async def test_a_failed_replace_leaves_the_stop_and_target_exactly_as_they_were():
+    b, f = _broker(_close_routes({("PATCH", "/v2/orders/T1"): (503, {"message": "down"})}))
+    with pytest.raises(AlpacaError, match="5xx"):
+        await b.submit(_close(symbol="EWJ", qty=144))
+    assert _kinds(f, "DELETE", "POST") == []  # nothing cancelled, so nothing to restore
+
+
+async def test_naked_position_gets_a_plain_market_sell():
+    b, f = _broker(_close_routes({
+        ("GET", "/v2/positions/EWJ"): _long_pos(avail="144"),
+        ("GET", "/v2/orders"): (200, []),
+        ("POST", "/v2/orders"): (200, {"id": "M1"}),
+    }))
+    assert await b.submit(_close(symbol="EWJ", qty=144)) == "M1"
+    body = [c[2] for c in f.calls if c[0] == "POST"][0]
+    assert body["type"] == "market" and body["side"] == "sell" and body["qty"] == "144"
+    assert "order_class" not in body and "stop_loss" not in body
+    assert _kinds(f, "DELETE", "PATCH") == []
+
+
+async def test_only_a_stop_is_live_is_refused_and_left_untouched():
+    only_stop = [{"id": "S1", "type": "stop", "side": "sell", "qty": "144", "status": "new",
+                  "stop_price": "90.66"}]
+    b, f = _broker(_close_routes({("GET", "/v2/orders"): (200, only_stop)}))
+    with pytest.raises(RuntimeError, match="unsupported"):
+        await b.submit(_close(symbol="EWJ", qty=144))
+    assert _kinds(f, "DELETE", "POST", "PATCH") == []
+
+
+async def test_finished_legs_and_entry_side_orders_are_ignored():
+    mixed = [
+        {"id": "P0", "type": "market", "side": "buy", "qty": "50", "status": "filled", "legs": [
+            {"id": "OLD1", "type": "limit", "side": "sell", "qty": "50", "status": "canceled",
+             "limit_price": "120.00"},
+            {"id": "OLD2", "type": "stop", "side": "sell", "qty": "50", "status": "filled",
+             "stop_price": "80.00"}]},
+        {"id": "PEND", "type": "limit", "side": "buy", "qty": "5", "status": "new",
+         "limit_price": "70.00", "legs": []},
+    ] + _REAL
+    b, f = _broker(_close_routes({("GET", "/v2/orders"): (200, mixed)}))
+    await b.submit(_close(symbol="EWJ", qty=144))
+    assert [c[1] for c in f.calls if c[0] == "PATCH"] == ["/v2/orders/T1"]  # the live target only
+
+
+async def test_an_oco_order_placed_earlier_is_found_and_used():
+    """An OCO re-placed after an incident: the take-profit is the top-level order and the
+    stop sits in its legs."""
     oco = [{"id": "O1", "type": "limit", "side": "sell", "qty": "144", "status": "new",
             "limit_price": "128.52", "order_class": "oco",
             "legs": [{"id": "O2", "type": "stop", "side": "sell", "qty": "144", "status": "held",
                       "stop_price": "90.66"}]}]
-    b, f = _broker(_routes({("GET", "/v2/orders"): (200, oco),
-                            ("DELETE", "/v2/orders/O1"): (200, None),
-                            ("DELETE", "/v2/orders/O2"): (200, None)}))
-    await b.submit(_close(symbol="EWJ", qty=144))
-    assert sorted(p for m, p, _ in f.calls if m == "DELETE") == ["/v2/orders/O1", "/v2/orders/O2"]
+    b, f = _broker(_close_routes({("GET", "/v2/orders"): (200, oco),
+                                    ("PATCH", "/v2/orders/O1"): (200, {"id": "O3"})}))
+    assert await b.submit(_close(symbol="EWJ", qty=144)) == "O3"
+    assert _kinds(f, "DELETE", "POST") == []
+
+
+async def test_if_the_stop_really_vanishes_after_the_replace_a_stop_is_placed_back():
+    no_stop = [{"id": "T2", "type": "limit", "side": "sell", "qty": "144", "status": "new",
+                "limit_price": "91.31"}]
+    b, f = _broker(_close_routes({
+        ("GET", "/v2/orders"): [(200, _REAL)] + [(200, no_stop)] * 5,
+        ("POST", "/v2/orders"): (200, {"id": "S9"}),
+    }))
+    assert await b.submit(_close(symbol="EWJ", qty=144)) == "T2"
+    stop = [c[2] for c in f.calls if c[0] == "POST"][0]
+    assert stop["type"] == "stop" and stop["stop_price"] == "90.66" and stop["side"] == "sell"
+
+
+async def test_losing_the_stop_and_failing_to_replace_it_is_loud():
+    no_stop = [{"id": "T2", "type": "limit", "side": "sell", "qty": "144", "status": "new",
+                "limit_price": "91.31"}]
+    b, _ = _broker(_close_routes({
+        ("GET", "/v2/orders"): [(200, _REAL)] + [(200, no_stop)] * 5,
+        ("POST", "/v2/orders"): (500, {"message": "down"}),
+    }))
+    with pytest.raises(RuntimeError, match="CRITICAL"):
+        await b.submit(_close(symbol="EWJ", qty=144))
+
+
+async def test_no_position_wrong_direction_and_partial_close_are_refused_without_touching_anything():
+    b, f = _broker({("GET", "/v2/positions/EWJ"): (404, {"message": "position does not exist"})})
+    with pytest.raises(RuntimeError, match="no_position"):
+        await b.submit(_close(symbol="EWJ"))
+    b, f = _broker(_close_routes())
+    with pytest.raises(RuntimeError, match="no_position"):  # BUY would ADD to a long
+        await b.submit(_close(symbol="EWJ", side=Side.BUY, qty=144))
+    b, f = _broker(_close_routes())
+    with pytest.raises(RuntimeError, match="unsupported"):  # 50 of 144
+        await b.submit(_close(symbol="EWJ", qty=50))
+    assert _kinds(f, "DELETE", "POST", "PATCH") == []
+
+
+def test_oms_treats_unsupported_and_no_position_as_terminal_not_retryable():
+    from execution.oms import TERMINAL_ERR, _classify
+
+    assert {"no_position", "unsupported"} <= TERMINAL_ERR
+    assert _classify(RuntimeError("no_position: nothing to close")) == "no_position"
+    assert _classify(RuntimeError("unsupported: reduce-only")) == "unsupported"
+    # a transient failure of the replace must be RETRIED, not rejected for good
+    assert _classify(AlpacaError(503, "down")) == "5xx"
+    assert _classify(RuntimeError("timeout: no current price")) == "timeout"
+
+
+async def test_live_exit_orders_include_held_stops_but_not_legs_of_unfilled_entries():
+    listed = [
+        # filled bracket: both legs count (the stop is "held")
+        {"id": "P1", "order_class": "bracket", "status": "filled", "symbol": "EWJ", "type": "market",
+         "side": "buy", "legs": [
+             {"id": "T1", "symbol": "EWJ", "type": "limit", "side": "sell", "qty": "144",
+              "status": "new", "limit_price": "128.52"},
+             {"id": "S1", "symbol": "EWJ", "type": "stop", "side": "sell", "qty": "144",
+              "status": "held", "stop_price": "90.66"}]},
+        # entry still queued: its held legs protect nothing yet and must NOT look like orphans
+        {"id": "P2", "order_class": "bracket", "status": "accepted", "symbol": "XLK",
+         "type": "market", "side": "buy", "legs": [
+             {"id": "T2", "symbol": "XLK", "type": "limit", "side": "sell", "qty": "50",
+              "status": "held", "limit_price": "200"},
+             {"id": "S2", "symbol": "XLK", "type": "stop", "side": "sell", "qty": "50",
+              "status": "held", "stop_price": "150"}]},
+        # an OCO placed after an incident: the target is top level, the stop is its leg
+        {"id": "O1", "order_class": "oco", "status": "accepted", "symbol": "EWU", "type": "limit",
+         "side": "sell", "qty": "351", "limit_price": "61.39", "legs": [
+             {"id": "O2", "symbol": "EWU", "type": "stop", "side": "sell", "qty": "351",
+              "status": "held", "stop_price": "45.77"}]},
+        # finished legs and a finished bracket are ignored
+        {"id": "P0", "order_class": "bracket", "status": "filled", "symbol": "SPY", "type": "market",
+         "side": "buy", "legs": [
+             {"id": "X1", "symbol": "SPY", "type": "stop", "side": "sell", "qty": "9",
+              "status": "filled", "stop_price": "1"}]},
+    ]
+    b, _ = _broker({("GET", "/v2/orders"): (200, listed)})
+    live = await b.live_exit_orders()
+    assert sorted(live) == ["EWJ", "EWU"]
+    assert sorted(o["id"] for o in live["EWJ"]) == ["S1", "T1"]
+    assert sorted(o["id"] for o in live["EWU"]) == ["O1", "O2"]
+
+
+async def test_take_profit_not_amendable_yet_is_a_wait_not_a_failure_and_touches_nothing():
+    """The 29 Oct finding: an OCO placed after hours is 'accepted' and Alpaca refuses to amend it
+    until the session opens. The close must wait (retryable) and change nothing."""
+    accepted = [{"id": "O1", "order_class": "oco", "type": "limit", "side": "sell", "qty": "144",
+                 "status": "accepted", "limit_price": "128.52", "symbol": "EWJ", "legs": [
+                     {"id": "O2", "type": "stop", "side": "sell", "qty": "144", "status": "held",
+                      "stop_price": "90.66", "symbol": "EWJ"}]}]
+    b, f = _broker(_close_routes({("GET", "/v2/orders"): (200, accepted)}))
+    with pytest.raises(RuntimeError, match="timeout"):
+        await b.submit(_close(symbol="EWJ", qty=144))
+    assert _kinds(f, "DELETE", "POST", "PATCH") == []
+
+
+async def test_alpaca_refusing_the_amend_is_also_treated_as_retryable():
+    b, f = _broker(_close_routes({("PATCH", "/v2/orders/T1"): (
+        422, {"code": 42210000, "message": "cannot replace order in accepted status"})}))
+    from execution.oms import _classify
+
+    with pytest.raises(RuntimeError, match="timeout") as ei:
+        await b.submit(_close(symbol="EWJ", qty=144))
+    assert _classify(ei.value) == "timeout"  # the OMS will retry, not reject
+    assert _kinds(f, "DELETE", "POST") == []

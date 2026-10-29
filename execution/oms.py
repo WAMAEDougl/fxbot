@@ -10,6 +10,7 @@ holds credentials in production.
 
 from __future__ import annotations
 
+import asyncio
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -79,12 +80,19 @@ class OMS:
         clock: Clock,
         *,
         retry: RetryPolicy | None = None,
+        close_retry: RetryPolicy | None = None,
         persist: Callable[[OrderState], None] | None = None,
     ) -> None:
         self.bus = bus
         self.broker = broker
         self.clock = clock
         self.retry = retry or RetryPolicy()
+        # A close that cannot happen YET (e.g. the broker will not amend a leg until the next
+        # session opens) must wait, not be abandoned after a minute: the position stays
+        # protected meanwhile. About 10 hours of patient retries by default.
+        self.close_retry = close_retry or RetryPolicy(max_attempts=60, base_delay=60.0,
+                                                      max_delay=900.0)
+        self._tasks: set[asyncio.Task] = set()
         self._persist = persist or (lambda _s: None)
         self._orders: dict[str, OrderState] = {}
         bus.subscribe(Order, self._on_order)
@@ -97,10 +105,18 @@ class OMS:
         st = OrderState(order=order)
         self._orders[coid] = st
         self._transition(st, OrderStatus.PENDING)
-        await self._submit_with_retry(st)
+        if order.reduce_only:
+            # Hours-long retries must not run inside the bus handler: that would stall market
+            # data and every other event until the close finally goes through.
+            task = asyncio.create_task(self._submit_with_retry(st, self.close_retry))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        else:
+            await self._submit_with_retry(st)
 
-    async def _submit_with_retry(self, st: OrderState) -> None:
-        while st.attempts < self.retry.max_attempts and st.status not in _TERMINAL:
+    async def _submit_with_retry(self, st: OrderState, policy: RetryPolicy | None = None) -> None:
+        policy = policy or self.retry
+        while st.attempts < policy.max_attempts and st.status not in _TERMINAL:
             st.attempts += 1
             try:
                 broker_id = await self.broker.submit(st.order)  # idempotent on coid
@@ -124,9 +140,21 @@ class OMS:
                         )
                     )
                     return
-                await self.clock.sleep(self.retry.delay(st.attempts))
+                await self.clock.sleep(policy.delay(st.attempts))
         if st.status not in _TERMINAL:
             self._transition(st, OrderStatus.REJECTED)
+            # never fail silently: an order that ran out of retries must reach the alerts
+            await self.bus.publish(
+                Rejection(
+                    ts=self.clock.now(),
+                    reason_code="RETRIES_EXHAUSTED",
+                    origin="broker",
+                    originating_event_id=st.order.event_id,
+                    detail=f"gave up after {st.attempts} attempts; last error: {st.last_error}",
+                    symbol=st.order.symbol,
+                    strategy_id=st.order.strategy_id,
+                )
+            )
 
     async def on_broker_fill(self, fill: Fill) -> None:
         st = self._orders.get(fill.order_id)

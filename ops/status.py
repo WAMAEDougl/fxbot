@@ -62,11 +62,38 @@ class Health:
     heartbeat_age_s: float | None = None
 
 
+def unprotected_positions(positions: list[dict], symbols_with_stop: set[str]) -> list[str]:
+    """Open positions that have no live stop order, e.g. ``["EWJ 144 sh"]``. A position without
+    a stop is the one condition the bracket rule exists to prevent, so it is alerted on its own."""
+    return [f"{p['symbol']} {abs(p['qty']):g} sh" for p in positions
+            if p["symbol"] not in symbols_with_stop and abs(p["qty"]) > 0]
+
+
+def orphan_orders(positions: dict[str, float], live: dict[str, list[dict]]) -> list[str]:
+    """Symbols with a live exit order that would not REDUCE a position that exists: e.g. a stop
+    left behind after its position closed, which could later open an unwanted position."""
+    out = []
+    for sym, legs in live.items():
+        pos = positions.get(sym, 0.0)
+        for leg in legs:
+            reduces = (pos > 0 and leg["side"] == "sell") or (pos < 0 and leg["side"] == "buy")
+            if not reduces:
+                out.append(f"{sym} {leg['type']} {leg['side']} {leg['qty']}")
+    return out
+
+
 def engine_health(now_epoch: float, heartbeat_epoch: float | None, kill_switch_on: bool,
-                  container_running: bool | None = None) -> Health:
-    """Judge the engine from its heartbeat file, the kill-switch flag and (optionally)
-    whether its container is running."""
+                  container_running: bool | None = None,
+                  unprotected: list[str] | None = None,
+                  orphans: list[str] | None = None) -> Health:
+    """Judge the engine from its heartbeat file, the kill-switch flag, (optionally) whether its
+    container is running, and any open position that has no stop order."""
     reasons: list[str] = []
+    if orphans:
+        reasons.append("ORPHAN ORDER (live exit order with no position to reduce): "
+                       + ", ".join(orphans))
+    if unprotected:
+        reasons.append("UNPROTECTED POSITION (no stop order): " + ", ".join(unprotected))
     age = None if heartbeat_epoch is None else now_epoch - heartbeat_epoch
     if container_running is False:
         reasons.append("engine container is not running")
@@ -110,7 +137,7 @@ def format_status(f: StatusFacts) -> str:
     eng = ("Engine: OK" + (f" (heartbeat {h.heartbeat_age_s:,.0f}s ago)"
                            if h.heartbeat_age_s is not None else ""))
     if not h.ok:
-        eng = "ENGINE PROBLEM: " + "; ".join(h.reasons)
+        eng = "PROBLEM: " + "; ".join(h.reasons)
     lines = [head, eng,
              f"Equity {_money(f.equity)} (day {_money(day, True)}, {day_pct:+.2f}%), "
              f"cash {_money(f.cash)}"]
@@ -143,7 +170,7 @@ def format_status(f: StatusFacts) -> str:
 
 def format_alert(env: str, when: datetime, health: Health) -> str:
     return (f"[{env}] fxbot WATCHDOG {when:%a %d %b %H:%M} UTC\n"
-            "ENGINE PROBLEM: " + "; ".join(health.reasons))
+            "PROBLEM: " + "; ".join(health.reasons))
 
 
 def send_telegram(text: str, token: str, chat_id: str, timeout: float = 15.0) -> None:

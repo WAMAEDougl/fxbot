@@ -58,3 +58,92 @@ async def test_duplicate_order_not_resubmitted():
     await bus.publish(_order())
     await bus.publish(_order())
     assert len(broker.submitted) == 1
+
+
+# ------------------------------------------------------- closes retry patiently #
+import asyncio  # noqa: E402
+
+from core.events import Rejection  # noqa: E402
+from execution.oms import RetryPolicy  # noqa: E402
+
+
+def _close(coid="close1"):
+    return Order(ts=T0, client_order_id=coid, symbol="EWJ", side=Side.SELL, qty=144,
+                 order_type=OrderType.MARKET, strategy_id="s", reduce_only=True)
+
+
+class _FlakyBroker:
+    """Fails with a retryable error N times, then accepts (like a leg that is not amendable
+    until the session opens)."""
+    broker = "flaky"
+
+    def __init__(self, fail_times, message="timeout: the take-profit order is 'accepted', not amendable yet"):
+        self.calls, self.fail_times, self.message = 0, fail_times, message
+
+    async def submit(self, order):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise RuntimeError(self.message)
+        return "B9"
+
+
+class _RecClock(SimClock):
+    def __init__(self, start):
+        super().__init__(start)
+        self.sleeps = []
+
+    async def sleep(self, s):
+        self.sleeps.append(s)
+
+
+async def test_a_close_that_cannot_happen_yet_is_retried_in_the_background_until_it_can():
+    bus, broker, clock = EventBus(), _FlakyBroker(fail_times=4), _RecClock(T0)
+    oms = OMS(bus, broker, clock, close_retry=RetryPolicy(max_attempts=60, base_delay=60.0,
+                                                          max_delay=900.0))
+    await bus.publish(_close())
+    # publish returned without waiting for the retries: the bus is not held up
+    assert oms.state("close1").status is OrderStatus.PENDING and broker.calls == 0
+    await asyncio.gather(*oms._tasks)
+    st = oms.state("close1")
+    assert st.status is OrderStatus.SUBMITTED and st.broker_order_id == "B9"
+    assert broker.calls == 5
+    assert all(d >= 30.0 for d in clock.sleeps)  # patient: minutes, not milliseconds
+
+
+async def test_close_retries_allow_about_ten_hours_by_default():
+    oms = OMS(EventBus(), _FlakyBroker(0), SimClock(T0))
+    p = oms.close_retry
+    assert p.max_attempts >= 40 and p.max_delay >= 600
+    assert oms.retry.max_attempts == 5  # entries keep the short policy
+
+
+async def test_a_close_that_never_succeeds_ends_in_a_visible_rejection_not_silence():
+    bus, rejections = EventBus(), []
+    bus.subscribe(Rejection, rejections.append)
+    oms = OMS(bus, _FlakyBroker(fail_times=99), SimClock(T0),
+              close_retry=RetryPolicy(max_attempts=3, base_delay=0.0, max_delay=0.0))
+    await bus.publish(_close())
+    await asyncio.gather(*oms._tasks)
+    assert oms.state("close1").status is OrderStatus.REJECTED
+    assert [r.reason_code for r in rejections] == ["RETRIES_EXHAUSTED"]
+    assert rejections[0].symbol == "EWJ" and "3 attempts" in rejections[0].detail
+
+
+async def test_entry_orders_that_run_out_of_retries_are_also_reported():
+    bus, rejections = EventBus(), []
+    bus.subscribe(Rejection, rejections.append)
+    OMS(bus, _FlakyBroker(fail_times=99), SimClock(T0),
+        retry=RetryPolicy(max_attempts=2, base_delay=0.0, max_delay=0.0))
+    await bus.publish(_order())  # an entry is still awaited inline
+    assert [r.reason_code for r in rejections] == ["RETRIES_EXHAUSTED"]
+
+
+async def test_no_position_is_final_immediately_with_no_retries():
+    bus, rejections = EventBus(), []
+    bus.subscribe(Rejection, rejections.append)
+    broker = _FlakyBroker(fail_times=99, message="no_position: nothing to close for EWJ")
+    oms = OMS(bus, broker, SimClock(T0))
+    await bus.publish(_close())
+    await asyncio.gather(*oms._tasks)
+    assert broker.calls == 1 and oms.state("close1").status is OrderStatus.REJECTED
+    assert [r.reason_code for r in rejections] == ["NO_POSITION"]

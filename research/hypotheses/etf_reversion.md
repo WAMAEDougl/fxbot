@@ -149,3 +149,24 @@ engine restarted on the fix, position adopted and still protected.
 Note: the strategy's time-stop clock (10 bars) restarts when the engine restarts, so EWJ's
 time-stop is counted from 2026-10-27 at the latest; the recovery exit is unaffected.
 One transient warning so far: a DNS failure in the fill poller (2026-10-27 08:40 UTC), retried.
+
+**2026-10-29: STOP CONDITION TRIGGERED; position left naked for ~26 hours; root cause fixed.**
+The first real close (EWJ, 28 Oct 04:00 UTC, market closed) failed. The old close cancelled the
+stop and target first. Alpaca cancelled the held stop at once but deferred cancelling the live
+take-profit until the 08:00 UTC pre-market, so the shares stayed locked, the sell could not be
+placed, and the restore attempt failed for the same reason. The error text contained
+"insufficient_funds", which the OMS treated as final (no retry). At 08:00 the deferred cancel
+completed and EWJ had no orders at all until 29 Oct 06:50 UTC, when the original stop (90.66) and
+target (128.52) were re-placed as an OCO. Paper money, price roughly flat, but it is precisely the
+condition the stop rule above exists for, and the earlier warning that "the first real close is
+untested against Alpaca" was borne out within two days.
+Fixes (all with tests, 162 passing): (1) a close never removes protection first: it sells THROUGH
+the take-profit leg by moving that leg to a marketable limit (stop stays live; OCO cancels it on
+the fill); no protective orders -> plain market sell; only a stop -> refuse and leave untouched;
+(2) if the broker cannot amend the order yet (an after-hours order is "accepted" and not
+amendable) the close waits, retried in the background for ~10 hours without blocking market data;
+(3) an order that runs out of retries now raises a visible rejection (was silent); (4) the hourly
+watchdog alerts on any open position with no stop, and on any live exit order with no position
+(orphan); (5) scripts/close_position.py closes one position safely by hand.
+Kill switch engaged 29 Oct 05:40 UTC while this was fixed. The real close of EWJ is being run
+through the new path (replace on the first amendable moment, fill at the 13:30 UTC open).
