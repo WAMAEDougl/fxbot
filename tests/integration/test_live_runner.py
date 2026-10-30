@@ -180,3 +180,30 @@ def test_env_port_guard():
         check_env_matches_port("paper", 4001)
     with pytest.raises(SystemExit):
         check_env_matches_port("live", 7497)
+
+
+def test_reconcile_drift_alert_is_not_repeated_every_cycle(tmp_path, monkeypatch):
+    """The reconciler runs every few minutes: the same unchanged drift must not page every time."""
+    from types import SimpleNamespace
+
+    import execution.live as live_mod
+    from ops.alerting import Severity
+
+    runner, _ = _runner(tmp_path, _bars(10))
+    sent = []
+    runner.alerter = Alerter({Severity.CRITICAL: [sent.append]})
+    div = [SimpleNamespace(symbol="EWJ", local_qty=144.0, broker_qty=0.0)]
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(live_mod.time, "monotonic", lambda: clock["t"])
+
+    runner._on_divergence(div, 127.0)
+    assert len(sent) == 1
+    for _ in range(20):  # twenty more reconcile cycles, same drift
+        clock["t"] += 300
+        runner._on_divergence(div, 127.0)
+    assert len(sent) == 2  # only the hourly reminder (20 x 300s = 6000s > 3600s) fired once more
+
+    other = [SimpleNamespace(symbol="EWU", local_qty=351.0, broker_qty=0.0)]
+    runner._on_divergence(other, 50.0)  # a DIFFERENT drift alerts straight away
+    assert len(sent) == 3
+    assert runner.ks.engaged  # alerting less never means halting less

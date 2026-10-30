@@ -147,3 +147,23 @@ async def test_no_position_is_final_immediately_with_no_retries():
     await asyncio.gather(*oms._tasks)
     assert broker.calls == 1 and oms.state("close1").status is OrderStatus.REJECTED
     assert [r.reason_code for r in rejections] == ["NO_POSITION"]
+
+
+# ---------------------------------------------- fills for orders we do not know #
+async def test_a_fill_for_an_unknown_order_still_reaches_the_portfolio():
+    """A close placed by hand, an OCO restored after an incident, or an order from before a
+    restart still changes the position at the broker; dropping its fill caused false drift."""
+    bus, fills = EventBus(), []
+    bus.subscribe(Fill, fills.append)
+    oms = OMS(bus, _Broker(), SimClock(T0))
+    await oms.on_broker_fill(_fill(Side.SELL, 144, 94.96, coid="not-ours"))
+    assert len(fills) == 1 and fills[0].qty == 144 and fills[0].order_id == "not-ours"
+    assert oms.external_fills == 1 and oms.state("not-ours") is None  # no state invented
+
+
+async def test_known_order_fills_are_not_counted_as_external():
+    bus = EventBus()
+    oms = OMS(bus, _Broker(), SimClock(T0))
+    await bus.publish(_order())
+    await oms.on_broker_fill(_fill(Side.BUY, 10, 100))
+    assert oms.external_fills == 0 and oms.state("c1").status is OrderStatus.FILLED

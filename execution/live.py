@@ -56,6 +56,8 @@ class LiveConfig:
 
 
 class LiveRunner:
+    DIVERGENCE_REMINDER_S = 3600.0
+
     def __init__(
         self,
         cfg: LiveConfig,
@@ -91,6 +93,7 @@ class LiveRunner:
         self._stop = asyncio.Event()
         self._poll_failures = 0
         self._ks_alerted = False
+        self._div_alert: tuple[tuple, float] = ((), float('-inf'))
         self._day: datetime | None = None
         self._day_start_equity = 0.0
 
@@ -234,9 +237,17 @@ class LiveRunner:
             self.ks.on_rejection()
 
     def _on_divergence(self, divs, eq_delta: float) -> None:
-        detail = f"{[(d.symbol, d.local_qty, d.broker_qty) for d in divs]} equity_delta={eq_delta:.2f}"
+        sig = tuple((d.symbol, d.local_qty, d.broker_qty) for d in divs)
+        detail = f"{list(sig)} equity_delta={eq_delta:.2f}"
         self.ks.on_reconcile_divergence(detail)
-        self.alerter.send(Severity.CRITICAL, f"[{self.cfg.env}] reconcile drift - halted", detail)
+        # The reconciler runs every few minutes, so an unchanged drift would page you every few
+        # minutes (214 times in one day). Alert on a NEW drift, then remind at most hourly.
+        now = time.monotonic()
+        last_sig, last_at = self._div_alert
+        if sig != last_sig or now - last_at >= self.DIVERGENCE_REMINDER_S:
+            self._div_alert = (sig, now)
+            self.alerter.send(Severity.CRITICAL, f"[{self.cfg.env}] reconcile drift - halted",
+                              detail)
 
     def _on_strategy_disabled(self, sid: str, exc: BaseException) -> None:
         self.alerter.send(Severity.CRITICAL, f"[{self.cfg.env}] strategy {sid} disabled", repr(exc))

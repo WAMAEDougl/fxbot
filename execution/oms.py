@@ -93,6 +93,7 @@ class OMS:
         self.close_retry = close_retry or RetryPolicy(max_attempts=60, base_delay=60.0,
                                                       max_delay=900.0)
         self._tasks: set[asyncio.Task] = set()
+        self.external_fills = 0  # fills for orders we did not place in this process
         self._persist = persist or (lambda _s: None)
         self._orders: dict[str, OrderState] = {}
         bus.subscribe(Order, self._on_order)
@@ -159,6 +160,12 @@ class OMS:
     async def on_broker_fill(self, fill: Fill) -> None:
         st = self._orders.get(fill.order_id)
         if st is None:
+            # A fill for an order this process does not know: one placed by hand, an OCO restored
+            # after an incident, or an order from before a restart. It still changed the position
+            # AT THE BROKER, so the portfolio must see it; dropping it made every such fill show
+            # up as false "reconcile drift" (214 critical alerts and a halt on 29-30 Oct).
+            self.external_fills += 1
+            await self.bus.publish(fill)
             return
         if fill.strategy_id != st.order.strategy_id:
             fill = replace(fill, strategy_id=st.order.strategy_id)
