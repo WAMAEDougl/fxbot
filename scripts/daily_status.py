@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sqlite3
 import sys
@@ -126,8 +127,15 @@ async def _run(args) -> int:
     now = datetime.now(UTC)
     kill = Path(os.environ.get("TS_KILLSWITCH_FILE", str(state / "HALT"))).exists()
     unprot, orphans = await _protection_problems(env)
+    reason = "HALT file present" if kill else ""
+    try:  # the engine publishes its in-memory kill switch (auto trips have no file)
+        ks = json.loads((state / "killswitch.json").read_text())
+        if ks.get("engaged"):
+            kill, reason = True, f"{ks.get('reason', '')} (since {ks.get('since')})"
+    except (OSError, ValueError):
+        pass
     health = engine_health(time.time(), _heartbeat(state / "healthy"), kill,
-                           unprotected=unprot, orphans=orphans)
+                           unprotected=unprot, orphans=orphans, kill_reason=reason)
 
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
 

@@ -170,3 +170,13 @@ watchdog alerts on any open position with no stop, and on any live exit order wi
 (orphan); (5) scripts/close_position.py closes one position safely by hand.
 Kill switch engaged 29 Oct 05:40 UTC while this was fixed. The real close of EWJ is being run
 through the new path (replace on the first amendable moment, fill at the 13:30 UTC open).
+
+**2026-11-05: false kill-switch trip, one buy signal missed.** On 4 Nov 02:28 UTC the reconciler
+halted the engine on "equity drift" (-500) with every position matching. Cause: local equity is
+re-marked once per daily bar while the broker marks live, so a normal 1-3% day exceeded the 0.5%
+tolerance. The trip latched, and the XLE buy at 5 Nov 05:00 (RSI 5) was rejected; exits kept working
+and no position was ever unprotected. This counts as a kill-switch trip NOT caused by market stress.
+Fixes (170 tests): the money check compares broker cash with cash implied by local fills (equity is
+informational), needs two consecutive mismatches; self-clearing trips (stale feed, daily loss, cash
+drift) now release by themselves while position divergence/handler errors/manual stay latched; the
+engine publishes its kill-switch state so the status and watchdog messages show it.

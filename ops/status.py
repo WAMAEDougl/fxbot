@@ -85,7 +85,8 @@ def orphan_orders(positions: dict[str, float], live: dict[str, list[dict]]) -> l
 def engine_health(now_epoch: float, heartbeat_epoch: float | None, kill_switch_on: bool,
                   container_running: bool | None = None,
                   unprotected: list[str] | None = None,
-                  orphans: list[str] | None = None) -> Health:
+                  orphans: list[str] | None = None,
+                  kill_reason: str = "") -> Health:
     """Judge the engine from its heartbeat file, the kill-switch flag, (optionally) whether its
     container is running, and any open position that has no stop order."""
     reasons: list[str] = []
@@ -102,7 +103,8 @@ def engine_health(now_epoch: float, heartbeat_epoch: float | None, kill_switch_o
     elif age > HEARTBEAT_STALE_S:
         reasons.append(f"heartbeat is {age:,.0f}s old (limit {HEARTBEAT_STALE_S:.0f}s)")
     if kill_switch_on:
-        reasons.append("KILL SWITCH IS ENGAGED (no new orders)")
+        reasons.append("KILL SWITCH IS ENGAGED (no new orders)"
+                       + (f": {kill_reason}" if kill_reason else ""))
     return Health(ok=not reasons, reasons=reasons, heartbeat_age_s=age)
 
 

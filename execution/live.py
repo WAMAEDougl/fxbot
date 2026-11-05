@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -128,6 +129,7 @@ class LiveRunner:
             qty_tolerance=self._recon_tols[0],
             equity_tolerance_frac=self._recon_tols[1],
             on_divergence=self._on_divergence,
+            on_ok=self.ks.on_reconcile_ok,
         )
 
         pending = await self._warmup()
@@ -141,7 +143,7 @@ class LiveRunner:
         res = await self.reconciler.run_once()
         if not res.ok:
             self.alerter.send(Severity.CRITICAL, f"[{self.cfg.env}] startup reconcile FAILED",
-                              f"{res.divergences} equity_delta={res.equity_delta:.2f}")
+                              f"{res.divergences} cash_delta={res.cash_delta:.2f}")
         for bar in pending:  # bars that closed while we were down
             await self._publish_bar(bar)
         self._roll_day(equity)
@@ -218,6 +220,7 @@ class LiveRunner:
         today = self.clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
         if self._day != today:
             self._day, self._day_start_equity = today, equity
+            self.ks.new_day()
 
     # -------------------------------------------------------------- hooks #
     def _persist_order(self, st: OrderState) -> None:
@@ -236,10 +239,11 @@ class LiveRunner:
         if r.origin in ("broker", "oms"):
             self.ks.on_rejection()
 
-    def _on_divergence(self, divs, eq_delta: float) -> None:
+    def _on_divergence(self, divs, cash_delta: float) -> None:
         sig = tuple((d.symbol, d.local_qty, d.broker_qty) for d in divs)
-        detail = f"{list(sig)} equity_delta={eq_delta:.2f}"
-        self.ks.on_reconcile_divergence(detail)
+        detail = f"{list(sig)} cash_delta={cash_delta:.2f}"
+        # Positions disagree: latch. Only money drift with matching positions self-clears.
+        self.ks.on_reconcile_divergence(detail, recoverable=not divs)
         # The reconciler runs every few minutes, so an unchanged drift would page you every few
         # minutes (214 times in one day). Alert on a NEW drift, then remind at most hourly.
         now = time.monotonic()
@@ -258,6 +262,19 @@ class LiveRunner:
         self.ks.engage(f"handler error on {etype.__name__}: {exc!r}")
         self.alerter.send(Severity.CRITICAL, f"[{self.cfg.env}] handler error - halted",
                           f"{getattr(handler, '__qualname__', handler)}: {exc!r}")
+
+    def _write_ks_state(self) -> None:
+        """Tell the separate status/watchdog process what the in-memory kill switch is doing."""
+        if self.cfg.health_file is None:
+            return
+        st = self.ks.state()
+        path = self.cfg.health_file.parent / "killswitch.json"
+        try:
+            path.write_text(json.dumps({
+                "engaged": st.engaged, "reason": st.reason,
+                "since": st.since.isoformat() if st.since else None}))
+        except OSError:
+            pass
 
     # ---------------------------------------------------------------- loop #
     async def run(self) -> None:
@@ -316,6 +333,7 @@ class LiveRunner:
                 self.alerter.send(Severity.CRITICAL, f"[{self.cfg.env}] KILL SWITCH ENGAGED",
                                   self.ks.state().reason)
             self._ks_alerted = engaged
+            self._write_ks_state()
             if self.cfg.health_file is not None:
                 self.cfg.health_file.parent.mkdir(parents=True, exist_ok=True)
                 self.cfg.health_file.write_text(f"{time.time():.0f}\n")
